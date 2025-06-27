@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin - Key/Info Management</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1, h2 { color: #333; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+        th { background-color: #f0f0f0; }
+        .actions a, .actions button { margin-right: 5px; text-decoration: none; color: #007bff; border: none; background: none; cursor: pointer; padding: 5px; }
+        .actions button.delete { color: #dc3545; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; }
+        .form-group input[type="text"], .form-group textarea { width: calc(100% - 22px); padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        .form-group textarea { min-height: 80px; }
+        .btn { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }
+        .btn-danger { background-color: #dc3545; }
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
+        .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert-error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .auth-param { display: none; } /* For password query param if needed */
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Admin Panel</h1>
+        <p><a href="/admin/logout?password=<%= encodeURIComponent(password) %>">Logout (Conceptual)</a></p>
+
+        <% if (message && message.text) { %>
+            <div class="alert <%= message.type === 'success' ? 'alert-success' : 'alert-error' %>">
+                <%= message.text %>
+            </div>
+        <% } %>
+
+        <h2>Manage Secrets</h2>
+
+        <% if (editingItemKey !== null && itemToEdit !== undefined) { %>
+            <h3>Edit Secret: <%= editingItemKey %></h3>
+            <form action="/admin/update-secret?password=<%= encodeURIComponent(password) %>" method="POST">
+                <input type="hidden" name="originalKey" value="<%= editingItemKey %>">
+                <div class="form-group">
+                    <label for="editSecretKey">Key (leave unchanged if not modifying key name):</label>
+                    <input type="text" id="editSecretKey" name="secretKey" value="<%= editingItemKey %>" required>
+                </div>
+                <div class="form-group">
+                    <label for="editSecretValue">Value (JSON format recommended for complex data):</label>
+                    <textarea id="editSecretValue" name="secretValue" required><%= typeof itemToEdit === 'string' ? itemToEdit : JSON.stringify(itemToEdit, null, 2) %></textarea>
+                </div>
+                <button type="submit" class="btn">Update Secret</button>
+                <a href="/admin?password=<%= encodeURIComponent(password) %>" class="btn">Cancel Edit</a>
+            </form>
+        <% } else { %>
+            <h3>Add New Secret</h3>
+            <form action="/admin/add-secret?password=<%= encodeURIComponent(password) %>" method="POST">
+                <div class="form-group">
+                    <label for="secretKey">Secret Key:</label>
+                    <input type="text" id="secretKey" name="secretKey" required>
+                </div>
+                <div class="form-group">
+                    <label for="secretValue">Secret Value (JSON format recommended for complex data):</label>
+                    <textarea id="secretValue" name="secretValue" required></textarea>
+                </div>
+                <button type="submit" class="btn">Add Secret</button>
+            </form>
+        <% } %>
+
+        <h2>Existing Secrets</h2>
+        <% if (secrets && secrets.length > 0) { %>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Key</th>
+                        <th>Value (Preview)</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% secrets.forEach(secret => { %>
+                        <tr>
+                            <td><%= secret.key %></td>
+                            <td>
+                                <%
+                                let preview = typeof secret.value === 'string' ? secret.value : JSON.stringify(secret.value);
+                                if (preview.length > 50) preview = preview.substring(0, 50) + '...';
+                                %>
+                                <%= preview %>
+                            </td>
+                            <td class="actions">
+                                <a href="/admin/edit-secret/<%= encodeURIComponent(secret.key) %>?password=<%= encodeURIComponent(password) %>">Edit</a>
+                                <form action="/admin/delete-secret/<%= encodeURIComponent(secret.key) %>?password=<%= encodeURIComponent(password) %>" method="POST" style="display:inline;">
+                                    <button type="submit" class="delete" onclick="return confirm('Are you sure you want to delete this secret?');">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        <% } else { %>
+            <p>No secrets stored yet.</p>
+        <% } %>
+    </div>
+    <input type="hidden" id="authPassword" class="auth-param" value="<%= encodeURIComponent(password) %>">
+    <script>
+        // Helper to add password to all admin links if needed, though server-side rendering handles most.
+        // This could be used if there were client-side generated links.
+        // document.addEventListener('DOMContentLoaded', function() {
+        //     const passwordParam = document.getElementById('authPassword').value;
+        //     if (passwordParam) {
+        //         document.querySelectorAll('a[href^="/admin"]').forEach(link => {
+        //             if (!link.href.includes('password=')) {
+        //                 link.href += (link.href.includes('?') ? '&' : '?') + 'password=' + passwordParam;
+        //             }
+        //         });
+        //     }
+        // });
+    </script>
+</body>
+</html>

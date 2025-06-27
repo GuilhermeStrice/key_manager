@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Client Example</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #messages { border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll; margin-bottom: 10px; }
+        .message { margin-bottom: 5px; }
+        .server { color: blue; }
+        .client { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Client Example</h1>
+    <div>
+        <label for="wsUrl">WebSocket URL:</label>
+        <input type="text" id="wsUrl" value="ws://localhost:3001">
+        <button id="connectBtn">Connect</button>
+        <button id="disconnectBtn" disabled>Disconnect</button>
+    </div>
+    <div id="messages"></div>
+    <div>
+        <input type="text" id="messageInput" placeholder="Enter message to send" disabled>
+        <button id="sendBtn" disabled>Send</button>
+    </div>
+
+    <script>
+        const wsUrlInput = document.getElementById('wsUrl');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const messagesDiv = document.getElementById('messages');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+
+        let socket = null;
+
+        function logMessage(message, type = 'info') {
+            const p = document.createElement('p');
+            p.textContent = message;
+            p.className = `message ${type}`;
+            messagesDiv.appendChild(p);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        connectBtn.addEventListener('click', () => {
+            if (socket) {
+                logMessage('Already connected or connecting.', 'error');
+                return;
+            }
+            const url = wsUrlInput.value;
+            logMessage(`Attempting to connect to ${url}...`);
+            socket = new WebSocket(url);
+
+            socket.onopen = () => {
+                logMessage('Connected to WebSocket server.', 'server');
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+            };
+
+            socket.onmessage = (event) => {
+                logMessage(`Server: ${event.data}`, 'server');
+            };
+
+            socket.onclose = (event) => {
+                logMessage(`Disconnected from WebSocket server. Code: ${event.code}, Reason: ${event.reason || 'N/A'}`, 'error');
+                socket = null;
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                messageInput.disabled = true;
+                sendBtn.disabled = true;
+            };
+
+            socket.onerror = (error) => {
+                logMessage('WebSocket error. See console for details.', 'error');
+                console.error('WebSocket error:', error);
+                // Note: onclose will usually be called after onerror.
+            };
+        });
+
+        disconnectBtn.addEventListener('click', () => {
+            if (socket) {
+                logMessage('Disconnecting...');
+                socket.close();
+            }
+        });
+
+        sendBtn.addEventListener('click', () => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const message = messageInput.value;
+                if (message.trim() === '') return;
+                logMessage(`Client: ${message}`, 'client');
+                socket.send(message);
+                messageInput.value = '';
+            } else {
+                logMessage('Not connected. Cannot send message.', 'error');
+            }
+        });
+
+        messageInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                sendBtn.click();
+            }
+        });
+    </script>
+</body>
+</html>
