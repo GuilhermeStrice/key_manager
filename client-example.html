@@ -22,20 +22,66 @@
         <button id="disconnectBtn" disabled>Disconnect</button>
     </div>
     <div id="messages"></div>
+    <hr>
     <div>
-        <input type="text" id="messageInput" placeholder="Enter message to send" disabled>
-        <button id="sendBtn" disabled>Send</button>
+        <h3>Client State:</h3>
+        <p>Client ID: <span id="clientIdSpan">N/A</span></p>
+        <p>Temporary ID: <span id="tempIdSpan">N/A</span></p>
+        <p>Auth Token: <input type="text" id="authTokenInput" placeholder="Enter auth token if known" size="40"></p>
+        <p>Status: <span id="clientStatusSpan">Disconnected</span></p>
     </div>
+    <hr>
+    <div>
+        <h3>Actions:</h3>
+        <input type="text" id="clientNameInput" placeholder="Your Client Name (for registration)">
+        <button id="registerBtn" disabled>Register Client</button>
+        <br><br>
+        <button id="authenticateBtn" disabled>Authenticate with Token</button>
+        <br><br>
+        <input type="text" id="secretKeyInput" placeholder="Secret Key to Request">
+        <button id="requestSecretBtn" disabled>Request Secret</button>
+        <br><br>
+        <button id="listSecretsBtn" disabled>List Authorized Secrets</button>
+    </div>
+     <hr>
+    <div>
+        <h3>Send Custom JSON Message:</h3>
+        <textarea id="customMessageInput" rows="4" style="width: 90%;" placeholder='{ "type": "YOUR_TYPE", "payload": { ... } }'></textarea>
+        <button id="sendCustomBtn" disabled>Send Custom JSON</button>
+    </div>
+
 
     <script>
         const wsUrlInput = document.getElementById('wsUrl');
         const connectBtn = document.getElementById('connectBtn');
         const disconnectBtn = document.getElementById('disconnectBtn');
         const messagesDiv = document.getElementById('messages');
-        const messageInput = document.getElementById('messageInput');
-        const sendBtn = document.getElementById('sendBtn');
+
+        const registerBtn = document.getElementById('registerBtn');
+        const clientNameInput = document.getElementById('clientNameInput');
+        const authenticateBtn = document.getElementById('authenticateBtn');
+        const authTokenInput = document.getElementById('authTokenInput');
+        const requestSecretBtn = document.getElementById('requestSecretBtn');
+        const secretKeyInput = document.getElementById('secretKeyInput');
+        const listSecretsBtn = document.getElementById('listSecretsBtn');
+        const customMessageInput = document.getElementById('customMessageInput');
+        const sendCustomBtn = document.getElementById('sendCustomBtn');
+
+        const clientIdSpan = document.getElementById('clientIdSpan');
+        const tempIdSpan = document.getElementById('tempIdSpan');
+        const clientStatusSpan = document.getElementById('clientStatusSpan');
+
 
         let socket = null;
+        let clientId = null; // Server-assigned client ID (for admin tracking)
+        let temporaryId = null; // Server-assigned temporary ID (while pending)
+        // Auth token will be taken from authTokenInput.value when needed
+
+        function updateClientStateDisplay() {
+            clientIdSpan.textContent = clientId || 'N/A';
+            tempIdSpan.textContent = temporaryId || 'N/A';
+            // authTokenInput value is the source of truth for sending
+        }
 
         function logMessage(message, type = 'info') {
             const p = document.createElement('p');
@@ -56,23 +102,80 @@
 
             socket.onopen = () => {
                 logMessage('Connected to WebSocket server.', 'server');
+                clientStatusSpan.textContent = 'Connected (Not Authenticated)';
                 connectBtn.disabled = true;
                 disconnectBtn.disabled = false;
-                messageInput.disabled = false;
-                sendBtn.disabled = false;
+                registerBtn.disabled = false;
+                authenticateBtn.disabled = false;
+                // requestSecretBtn, listSecretsBtn, sendCustomBtn remain disabled until authenticated
+                sendCustomBtn.disabled = false; // Allow sending custom messages once connected
             };
 
             socket.onmessage = (event) => {
-                logMessage(`Server: ${event.data}`, 'server');
+                try {
+                    const serverMessage = JSON.parse(event.data);
+                    logMessage(`Server: ${JSON.stringify(serverMessage, null, 2)}`, 'server');
+
+                    // Handle different message types from server
+                    switch(serverMessage.type) {
+                        case 'WELCOME':
+                            // Already logged
+                            break;
+                        case 'REGISTRATION_PENDING':
+                            clientId = serverMessage.payload.clientId;
+                            temporaryId = serverMessage.payload.temporaryId;
+                            clientStatusSpan.textContent = 'Registration Pending Approval';
+                            updateClientStateDisplay();
+                            logMessage(`IMPORTANT: Your Client ID for admin tracking is ${clientId}. Your temporary ID is ${temporaryId}. Store your permanent Auth Token from admin once approved.`, 'info');
+                            break;
+                        case 'AUTHENTICATED':
+                            clientStatusSpan.textContent = `Authenticated as ${serverMessage.payload.name} (${serverMessage.payload.clientId})`;
+                            // authTokenInput.value might already have the token, or admin provides it.
+                            // No need to set authTokenInput.value from here unless server sends it back for some reason.
+                            requestSecretBtn.disabled = false;
+                            listSecretsBtn.disabled = false;
+                            logMessage(`Associated secrets: ${serverMessage.payload.associatedSecretKeys.join(', ')}`, 'info');
+                            break;
+                        case 'AUTH_FAILED':
+                            clientStatusSpan.textContent = 'Authentication Failed';
+                            authTokenInput.value = ''; // Clear token if it failed
+                            requestSecretBtn.disabled = true;
+                            listSecretsBtn.disabled = true;
+                            break;
+                        case 'SECRET_RESPONSE':
+                            logMessage(`Secret "${serverMessage.payload.secretKey}": ${JSON.stringify(serverMessage.payload.value)}`, 'info');
+                            break;
+                        case 'AUTHORIZED_SECRETS_LIST':
+                            logMessage(`You are authorized to access: ${serverMessage.payload.authorizedSecretKeys.join(', ')}`, 'info');
+                            break;
+                        case 'UNAUTHORIZED_SECRET_ACCESS':
+                            logMessage(`Access denied for secret: ${serverMessage.payload.secretKey}`, 'error');
+                            break;
+                        case 'ERROR':
+                            logMessage(`Server Error: ${serverMessage.payload.message}`, 'error');
+                            break;
+                        default:
+                            logMessage(`Unknown message type from server: ${serverMessage.type}`, 'error');
+                    }
+                } catch (e) {
+                    logMessage(`Received non-JSON message from server: ${event.data}`, 'error');
+                }
             };
 
             socket.onclose = (event) => {
                 logMessage(`Disconnected from WebSocket server. Code: ${event.code}, Reason: ${event.reason || 'N/A'}`, 'error');
+                clientStatusSpan.textContent = 'Disconnected';
                 socket = null;
                 connectBtn.disabled = false;
                 disconnectBtn.disabled = true;
-                messageInput.disabled = true;
-                sendBtn.disabled = true;
+                registerBtn.disabled = true;
+                authenticateBtn.disabled = true;
+                requestSecretBtn.disabled = true;
+                listSecretsBtn.disabled = true;
+                sendCustomBtn.disabled = true;
+                clientId = null;
+                temporaryId = null;
+                updateClientStateDisplay();
             };
 
             socket.onerror = (error) => {
@@ -89,23 +192,67 @@
             }
         });
 
-        sendBtn.addEventListener('click', () => {
+        function sendWebSocketMessage(messageObject) {
             if (socket && socket.readyState === WebSocket.OPEN) {
-                const message = messageInput.value;
-                if (message.trim() === '') return;
-                logMessage(`Client: ${message}`, 'client');
-                socket.send(message);
-                messageInput.value = '';
+                const messageString = JSON.stringify(messageObject);
+                logMessage(`Client: ${messageString}`, 'client');
+                socket.send(messageString);
             } else {
                 logMessage('Not connected. Cannot send message.', 'error');
             }
+        }
+
+        registerBtn.addEventListener('click', () => {
+            const clientName = clientNameInput.value.trim();
+            if (!clientName) {
+                logMessage('Please enter a client name for registration.', 'error');
+                return;
+            }
+            sendWebSocketMessage({
+                type: "REGISTER_CLIENT",
+                payload: { clientName: clientName }
+            });
         });
 
-        messageInput.addEventListener('keypress', (event) => {
-            if (event.key === 'Enter') {
-                sendBtn.click();
+        authenticateBtn.addEventListener('click', () => {
+            const authToken = authTokenInput.value.trim();
+            if (!authToken) {
+                logMessage('Please enter an auth token to authenticate.', 'error');
+                return;
+            }
+            sendWebSocketMessage({
+                type: "AUTHENTICATE",
+                payload: { authToken: authToken }
+            });
+        });
+
+        requestSecretBtn.addEventListener('click', () => {
+            const secretKey = secretKeyInput.value.trim();
+            if (!secretKey) {
+                logMessage('Please enter a secret key to request.', 'error');
+                return;
+            }
+            sendWebSocketMessage({
+                type: "REQUEST_SECRET",
+                payload: { secretKey: secretKey }
+            });
+        });
+
+        listSecretsBtn.addEventListener('click', () => {
+            sendWebSocketMessage({
+                type: "LIST_AUTHORIZED_SECRETS"
+            });
+        });
+
+        sendCustomBtn.addEventListener('click', () => {
+            try {
+                const customJson = JSON.parse(customMessageInput.value);
+                sendWebSocketMessage(customJson);
+            } catch (e) {
+                logMessage('Invalid JSON in custom message input.', 'error');
             }
         });
+
     </script>
 </body>
 </html>

@@ -7,7 +7,8 @@
     "build": "tsc",
     "start": "node dist/main.js",
     "dev": "tsc -w & nodemon dist/main.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "repository": {
     "type": "git",
@@ -23,15 +24,20 @@
   "homepage": "https://github.com/GuilhermeStrice/key_manager#readme",
   "devDependencies": {
     "@types/express": "^5.0.3",
+    "@types/jest": "^30.0.0",
     "@types/node": "^24.0.4",
     "@types/ws": "^8.18.1",
+    "jest": "^30.0.3",
     "nodemon": "^3.1.10",
+    "ts-jest": "^29.4.0",
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "@types/helmet": "^0.0.48",
     "dotenv": "^16.6.0",
     "ejs": "^3.1.10",
     "express": "^5.1.0",
+    "helmet": "^8.1.0",
     "ws": "^8.18.2"
   }
 }

@@ -26,8 +26,12 @@
 </head>
 <body>
     <div class="container">
-        <h1>Admin Panel</h1>
-        <p><a href="/admin/logout?password=<%= encodeURIComponent(password) %>">Logout (Conceptual)</a></p>
+        <h1>Secret Management</h1>
+        <div class="nav-links">
+            <a href="/admin?password=<%= encodeURIComponent(password) %>">Manage Secrets</a>
+            <a href="/admin/clients?password=<%= encodeURIComponent(password) %>">Manage Clients</a>
+            <a href="/admin/logout?password=<%= encodeURIComponent(password) %>" style="float: right;">Logout</a>
+        </div>
 
         <% if (message && message.text) { %>
             <div class="alert <%= message.type === 'success' ? 'alert-success' : 'alert-error' %>">
