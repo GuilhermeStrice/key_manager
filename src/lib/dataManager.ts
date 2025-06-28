@@ -16,9 +16,9 @@ export interface ClientInfo {
   id: string; // Unique client identifier (e.g., a UUID)
   name: string; // User-friendly name provided by the client or admin
   status: ClientStatus;
-  authToken?: string; // Secure token generated upon approval
+  // authToken removed - WebSocket access will be globally controlled
   associatedSecretKeys: string[]; // Keys of secrets this client can access
-  temporaryId?: string; // Optional: A temporary ID or token given to client during pending state
+  // temporaryId removed
   requestedSecretKeys?: string[]; // Optional: Keys initially requested by the client
   dateCreated: string; // ISO 8601 date string
   dateUpdated: string; // ISO 8601 date string
@@ -207,7 +207,7 @@ export async function addPendingClient(
   }
 
   const clientId = `client_${generateRandomToken(8)}`; // Shorter, more manageable ID
-  const temporaryId = `temp_${generateRandomToken(16)}`; // Token for client to hold while pending
+  // temporaryId removed
   const now = new Date().toISOString();
 
   const newClient: ClientInfo = {
@@ -215,7 +215,7 @@ export async function addPendingClient(
     name: clientName.trim(),
     status: 'pending',
     associatedSecretKeys: [],
-    temporaryId: temporaryId,
+    // temporaryId: temporaryId, // Removed
     requestedSecretKeys: requestedSecretKeys || [],
     dateCreated: now,
     dateUpdated: now,
@@ -254,8 +254,8 @@ export async function approveClient(clientId: string): Promise<ClientInfo> {
   }
 
   client.status = 'approved';
-  client.authToken = `auth_${generateRandomToken(24)}`; // Generate a new auth token
-  client.temporaryId = undefined; // Clear temporary ID
+  // client.authToken = `auth_${generateRandomToken(24)}`; // authToken removed
+  // client.temporaryId = undefined; // temporaryId removed
   client.dateUpdated = new Date().toISOString();
 
   await saveData();
@@ -277,8 +277,8 @@ export async function rejectClient(clientId: string): Promise<ClientInfo> {
   }
 
   client.status = 'rejected';
-  client.authToken = undefined; // Ensure no auth token
-  client.temporaryId = undefined; // Clear temporary ID
+  // client.authToken = undefined; // authToken removed
+  // client.temporaryId = undefined; // temporaryId removed
   client.dateUpdated = new Date().toISOString();
   // Consider if associatedSecretKeys or requestedSecretKeys should be cleared.
   // For now, keeping them for audit/history.
@@ -374,12 +374,13 @@ export async function dissociateSecretFromClient(clientId: string, secretKey: st
  * @param authToken The authentication token of the client.
  * @returns ClientInfo object or undefined if not found or not approved.
  */
-export function getClientByAuthToken(authToken: string): ClientInfo | undefined {
-  const client = Object.values(dataStore.clients).find(
-    c => c.status === 'approved' && c.authToken === authToken
-  );
-  return client ? JSON.parse(JSON.stringify(client)) : undefined;
-}
+// export function getClientByAuthToken(authToken: string): ClientInfo | undefined {
+//   const client = Object.values(dataStore.clients).find(
+//     c => c.status === 'approved' && c.authToken === authToken
+//   );
+//   return client ? JSON.parse(JSON.stringify(client)) : undefined;
+// }
+// This function is now obsolete as authToken is removed.
 
 /**
  * Deletes a client and their associations.

@@ -277,9 +277,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     // currentPassword from query is removed.
     try {
       const client = await DataManager.approveClient(clientId);
-      // For security, the authToken should ideally be shown only once, or there should be a separate mechanism to retrieve it.
-      // Passing it in the message for now for dev purposes.
-      res.redirect(`/admin/clients?message=Client+${client.name}+approved.+Token:+${client.authToken}&messageType=success`);
+      // authToken is no longer generated or part of ClientInfo
+      res.redirect(`/admin/clients?message=Client+${client.name}+approved.&messageType=success`);
     } catch (error: any) {
       res.redirect(`/admin/clients?message=Error+approving+client:+${encodeURIComponent(error.message)}&messageType=error`);
     }

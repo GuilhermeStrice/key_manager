@@ -83,7 +83,7 @@
                         <% pendingClients.forEach(client => { %>
                             <tr>
                                 <td><%= client.name %></td>
-                                <td class="mono"><%= client.id %><% if (client.temporaryId) { %><br><span class="small-text">Temp ID: <%= client.temporaryId %></span><% } %></td>
+                                <td class="mono"><%= client.id %></td>
                                 <td><%= client.requestedSecretKeys && client.requestedSecretKeys.length > 0 ? client.requestedSecretKeys.join(', ') : 'None' %></td>
                                 <td><%= new Date(client.dateCreated).toLocaleString() %></td>
                                 <td class="actions">
@@ -109,7 +109,6 @@
                         <tr>
                             <th>Name</th>
                             <th>Client ID</th>
-                            <th>Auth Token</th>
                             <th>Associated Secrets</th>
                             <th>Date Approved/Updated</th>
                             <th>Actions</th>
@@ -120,7 +119,6 @@
                             <tr>
                                 <td><%= client.name %></td>
                                 <td class="mono"><%= client.id %></td>
-                                <td class="mono small-text"><%= client.authToken %><br> (Copy this token for the client application. It will only be shown once after approval if not displayed here.)</td>
                                 <td><%= client.associatedSecretKeys.join(', ') || 'None' %></td>
                                 <td><%= new Date(client.dateUpdated).toLocaleString() %></td>
                                 <td class="actions">
