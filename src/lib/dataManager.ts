@@ -205,7 +205,9 @@ export async function addPendingClient(
   clientName: string,
   requestedSecretKeys?: string[]
 ): Promise<ClientInfo> {
+  console.log('[DataManager] addPendingClient called. Name:', clientName, 'Requested Keys:', requestedSecretKeys);
   if (!clientName || typeof clientName !== 'string' || clientName.trim() === "") {
+    console.error('[DataManager] addPendingClient failed: Client name invalid.');
     throw new Error("Client name must be a non-empty string.");
   }
 
@@ -226,10 +228,12 @@ export async function addPendingClient(
 
   if (dataStore.clients[clientId]) {
     // Extremely unlikely with random generation, but good practice
+    console.error('[DataManager] addPendingClient failed: Client ID collision.');
     throw new Error("Client ID collision. Please try again.");
   }
 
   dataStore.clients[clientId] = newClient;
+  console.log('[DataManager] Stored new pending client:', newClient);
   await saveData();
   return JSON.parse(JSON.stringify(newClient)); // Return a copy
 }

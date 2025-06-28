@@ -32,12 +32,14 @@ export function startWebSocketServer(port: number) {
 
       switch (type) {
         case 'REGISTER_CLIENT':
+          console.log('[WebSocket] Attempting to register client. Payload:', payload);
           try {
             if (!payload || !payload.clientName) {
               throw new Error("clientName is required for registration.");
             }
             // Add to DataManager as pending
             const newClient = await DataManager.addPendingClient(payload.clientName, payload.requestedSecretKeys);
+            console.log('[WebSocket] Client registration pending in DataManager. Client Temp ID:', newClient.temporaryId);
             ws.send(JSON.stringify({
               type: "REGISTRATION_PENDING",
               payload: {
@@ -47,6 +49,7 @@ export function startWebSocketServer(port: number) {
               }
             }));
           } catch (error: any) {
+            console.error('[WebSocket] Error during client registration:', error);
             ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Registration failed: ${error.message}` } }));
           }
           break;
