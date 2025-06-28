@@ -63,6 +63,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
             // Optional: req.user = decoded;
             return next(); // Valid JWT cookie, allow access
         } catch (err: any) { // Type err as any to allow accessing err.message
+            // console.warn is kept as it's useful for ops, but detailed trace logs removed
             console.warn('Invalid JWT cookie:', err.message);
             res.clearCookie(ADMIN_COOKIE_NAME, { path: '/admin' }); // Clear bad cookie
             return res.status(401).redirect('/admin/login'); // Redirect immediately
