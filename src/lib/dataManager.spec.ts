@@ -55,9 +55,14 @@ describe('DataManager', () => {
   describe('Initialization', () => {
     it('should initialize, create data directory and salt file if they do not exist', async () => {
       (fs.access as jest.Mock).mockRejectedValueOnce(new Error('ENOENT_DIR')).mockRejectedValueOnce(new Error('ENOENT_SALT')); // Dir and salt don't exist
+      // Simulate fs.readFile failing for both salt and data files
+      const saltError: any = new Error('Salt file not found');
+      saltError.code = 'ENOENT';
+      const dataError: any = new Error('Data file not found');
+      dataError.code = 'ENOENT';
       (fs.readFile as jest.Mock) // Override for this test
-        .mockRejectedValueOnce(new Error('ENOENT_SALT')) // Salt file read fails
-        .mockRejectedValueOnce(new Error('ENOENT_DATA')); // Data file read fails
+        .mockRejectedValueOnce(saltError) // Salt file read fails
+        .mockRejectedValueOnce(dataError); // Data file read fails
 
       await DataManager.initializeDataManager('newpassword');
 

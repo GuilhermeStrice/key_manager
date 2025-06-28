@@ -88,50 +88,6 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   // The adminAuth middleware is applied individually to each protected /admin/* route below,
   // except for /admin/login routes themselves which handle their own logic.
 
-
-  // LOGIN ROUTES
-  app.get('/admin/login', (req, res) => {
-     res.send(`
-            <h1>Admin Login</h1>
-            <form action="/admin/login" method="POST">
-                <label for="password">Password:</label>
-                <input type="password" id="password" name="password" required>
-                <button type="submit">Login</button>
-            </form>
-            <p>Hint: Use the server startup password.</p>
-        `);
-    }
-
-    if (req.path === '/admin/login' && req.method === 'POST') {
-        if (req.body.password === serverAdminPasswordSingleton) {
-            // In a real app, set a session cookie here.
-            // For now, we'll just redirect and expect the password for other /admin routes.
-            // Or, for simplicity, we can just let them proceed if they POSTed correctly,
-            // but that's not how typical sessions work.
-            // A better approach for this simple case might be to just always require the password
-            // as a query param or bearer token for all admin actions after this.
-            // Let's stick to the Bearer token / query param for subsequent requests.
-            // This login form is more for show until proper sessions are built.
-            // IMPORTANT: Since query param password is removed, user MUST use Bearer token for subsequent requests.
-            // Or we implement actual sessions.
-            // Generate JWT
-            const token = jwt.sign({ admin: true, user: 'admin' }, JWT_SECRET, { expiresIn: '1h' });
-            res.cookie(ADMIN_COOKIE_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', path: '/admin' });
-            return res.redirect('/admin'); // Redirect to admin page after setting cookie
-        } else {
-            return res.status(401).send('<h1>Admin Login</h1><p>Incorrect password.</p><form action="/admin/login" method="POST"><label for="password">Password:</label><input type="password" id="password" name="password" required><button type="submit">Login</button></form>');
-        }
-    }
-
-    // If trying to access other /admin routes without auth
-    if (req.path.startsWith('/admin') && req.path !== '/admin/login') {
-        return res.status(401).redirect('/admin/login');
-    }
-
-    // For non-admin routes
-    next();
-  };
-
   // Apply auth to all /admin routes except potentially the login page itself if handled differently
   // app.use('/admin', adminAuth); // This would protect /admin/login too, needs care.
   // Let's make specific routes and protect them individually or use a more granular approach.
