@@ -92,6 +92,10 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   // Middleware for parsing cookies
   app.use(cookieParser());
 
+  // Middleware for serving static files (e.g., CSS, client-side JS)
+  // __dirname is src/http, so ../../public points to the project's public directory
+  app.use(express.static(path.join(__dirname, '../../public')));
+
   // Session middleware configuration (needed for csurf)
   // IMPORTANT: Use a strong, unique secret from environment variables in production
   const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
@@ -214,7 +218,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         res.redirect(`/admin/groups/${groupId}/secrets?message=Secret+deleted+successfully.&messageType=success`);
     } catch (error: any) {
         console.error(`Error deleting secret ${secretKey} from group context ${groupId}:`, error);
-        res.redirect(`/admin/groups/${groupId}/secrets?message=Error+deleting+secret:+${encodeURIComponent(error.message)}&messageType=error`);
+        res.redirect(`/admin/groups/${groupId}/secrets?message=Error+deleting+secret.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -250,7 +254,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
     } catch (error: any) {
         console.error(`Error preparing to edit secret ${secretKey} in group ${groupId}:`, error);
-        res.redirect(`/admin/groups/${groupId}/secrets?message=Error+loading+secret+for+edit:+${encodeURIComponent(error.message)}&messageType=error`);
+        res.redirect(`/admin/groups/${groupId}/secrets?message=Error+loading+secret+for+edit.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -284,7 +288,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         res.redirect(`/admin/groups/${groupId}/secrets?message=Secret+value+updated+successfully.&messageType=success`);
     } catch (error: any) {
         console.error(`Error updating secret ${secretKey} in group ${groupId}:`, error);
-        res.redirect(`/admin/groups/${groupId}/secrets/${encodeURIComponent(secretKey)}/edit?message=Error+updating+secret:+${encodeURIComponent(error.message)}&messageType=error`);
+        res.redirect(`/admin/groups/${groupId}/secrets/${encodeURIComponent(secretKey)}/edit?message=Error+updating+secret.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -313,7 +317,11 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         res.redirect(`/admin/groups/${groupId}/secrets?message=Secret+added+to+group+successfully.&messageType=success`);
     } catch (error: any) {
         console.error(`Error adding secret to group ${groupId}:`, error);
-        res.redirect(`/admin/groups/${groupId}/secrets?message=Error+adding+secret+to+group:+${encodeURIComponent(error.message)}&messageType=error`);
+        let userMessage = "Error+adding+secret+to+group.+Please+check+server+logs.";
+        if (error.message && error.message.includes("already exists")) {
+            userMessage = "Error+adding+secret+to+group:+A+secret+with+that+key+already+exists.";
+        }
+        res.redirect(`/admin/groups/${groupId}/secrets?message=${userMessage}&messageType=error`);
     }
   });
 
@@ -353,7 +361,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
     } catch (error: any) {
         console.error(`Error viewing secrets for group ${req.params.groupId}:`, error);
-        res.redirect(`/admin?message=Error+loading+secrets+for+group:+${encodeURIComponent(error.message)}&messageType=error`);
+        res.redirect(`/admin?message=Error+loading+secrets+for+group.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -368,7 +376,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         res.redirect('/admin?message=Group+and+its+secrets+deleted+successfully.&messageType=success');
     } catch (error: any) {
         console.error("Error deleting secret group:", error);
-        res.redirect(`/admin?message=Error+deleting+group:+${encodeURIComponent(error.message)}&messageType=error`);
+        res.redirect(`/admin?message=Error+deleting+group.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -404,7 +412,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         });
     } catch (error: any) {
         console.error("Error preparing to edit group:", error);
-        res.redirect(`/admin?message=Error+loading+group+for+edit:+${encodeURIComponent(error.message)}&messageType=error`);
+        res.redirect(`/admin?message=Error+loading+group+for+edit.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -424,10 +432,15 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         res.redirect('/admin?message=Group+renamed+successfully.&messageType=success');
     } catch (error: any) {
         console.error("Error renaming secret group:", error);
-        // Redirect back to the edit page for this group on error, or to main admin page
         const groupIdParam = req.params.groupId || '';
         const redirectPath = groupIdParam ? `/admin/groups/edit/${groupIdParam}` : '/admin';
-        res.redirect(`${redirectPath}?message=Error+renaming+group:+${encodeURIComponent(error.message)}&messageType=error`);
+        let userMessage = "Error+renaming+group.+Please+check+server+logs.";
+        if (error.message && error.message.includes("already exists")) {
+            userMessage = "A+group+with+that+name+already+exists.";
+        } else if (error.message && error.message.includes("not found")) {
+            userMessage = "Group+not+found+and+could+not+be+renamed.";
+        }
+        res.redirect(`${redirectPath}?message=${userMessage}&messageType=error`);
     }
   });
 
@@ -511,7 +524,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         });
     } catch (error: any) {
         console.error("Error rendering edit page:", error);
-        res.redirect(`/admin?message=Error+loading+edit+page:+${encodeURIComponent(error.message)}&messageType=error`);
+        res.redirect(`/admin?message=Error+loading+edit+page.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -545,8 +558,14 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
       res.redirect(`/admin?message=Secret+added+successfully.&messageType=success`);
     } catch (error: any) {
       console.error("Error adding secret:", error);
+      let userMessage = "Error+adding+secret.+Please+check+server+logs.";
+      if (error.message && error.message.includes("already exists")) {
+          userMessage = "Error+adding+secret:+A+secret+with+that+key+already+exists.";
+      } else if (error.message && error.message.includes("Group not found")) {
+          userMessage = "Error+adding+secret:+The+specified+group+was+not+found.";
+      }
       // Consider preserving form fields on error redirect if desired, by passing them in query
-      res.redirect(`/admin?message=Error+adding+secret:+${encodeURIComponent(error.message)}&messageType=error`);
+      res.redirect(`/admin?message=${userMessage}&messageType=error`);
     }
   });
 
@@ -582,7 +601,11 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         res.redirect(`/admin?message=Secret+value+updated+successfully.&messageType=success`);
     } catch (error: any) {
         console.error("Error updating secret value:", error);
-        res.redirect(`/admin/edit-secret/${encodeURIComponent(originalKey)}?message=Error+updating+secret:+${encodeURIComponent(error.message)}&messageType=error`);
+        let userMessage = "Error+updating+secret+value.+Please+check+server+logs.";
+        if (error.message && error.message.includes("not found")) {
+            userMessage = "Error+updating+secret:+Secret+not+found.";
+        }
+        res.redirect(`/admin/edit-secret/${encodeURIComponent(originalKey)}?message=${userMessage}&messageType=error`);
     }
   });
 
@@ -595,7 +618,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
       res.redirect(`/admin?message=Secret+deleted&messageType=success`);
     } catch (error: any) {
       console.error("Error deleting secret:", error);
-      res.redirect(`/admin?message=Error+deleting+secret:+${encodeURIComponent(error.message)}&messageType=error`);
+      res.redirect(`/admin?message=Error+deleting+secret.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -660,7 +683,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
       notifyClientStatusUpdate(clientId, 'approved', `Client ${client.name} has been approved by an administrator.`);
       res.redirect(`/admin/clients?message=Client+${client.name}+approved.&messageType=success`);
     } catch (error: any) {
-      res.redirect(`/admin/clients?message=Error+approving+client:+${encodeURIComponent(error.message)}&messageType=error`);
+      console.error("Error approving client:", error); // Added console.error for server-side logging
+      res.redirect(`/admin/clients?message=Error+approving+client.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -672,7 +696,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
       notifyClientStatusUpdate(clientId, 'rejected', `Client ${client.name} has been rejected by an administrator.`);
       res.redirect(`/admin/clients?message=Client+${client.name}+rejected.&messageType=success`);
     } catch (error: any) {
-      res.redirect(`/admin/clients?message=Error+rejecting+client:+${encodeURIComponent(error.message)}&messageType=error`);
+      console.error("Error rejecting client:", error); // Added console.error for server-side logging
+      res.redirect(`/admin/clients?message=Error+rejecting+client.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -684,7 +709,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
       await DataManager.deleteClient(clientId);
       res.redirect(`/admin/clients?message=Client+${clientId}+revoked+(deleted).&messageType=success`);
     } catch (error: any) {
-      res.redirect(`/admin/clients?message=Error+revoking+client:+${encodeURIComponent(error.message)}&messageType=error`);
+      console.error("Error revoking client:", error); // Added console.error for server-side logging
+      res.redirect(`/admin/clients?message=Error+revoking+client.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -714,7 +740,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         csrfToken: req.csrfToken()
       });
     } catch (error: any) {
-      res.redirect(`/admin/clients?message=Error+loading+group+management+for+client:+${encodeURIComponent(error.message)}&messageType=error`);
+      console.error("Error loading group management for client:", error); // Added console.error
+      res.redirect(`/admin/clients?message=Error+loading+group+management+for+client.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -739,7 +766,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
       res.redirect(`/admin/clients/${clientId}/groups?message=Client+group+associations+updated.&messageType=success`);
     } catch (error: any) {
-      res.redirect(`/admin/clients/${clientId}/groups?message=Error+updating+group+associations:+${encodeURIComponent(error.message)}&messageType=error`);
+      console.error("Error updating group associations:", error); // Added console.error
+      res.redirect(`/admin/clients/${clientId}/groups?message=Error+updating+group+associations.+Please+check+server+logs.&messageType=error`);
     }
   });
 
@@ -812,7 +840,11 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         res.redirect('/admin?message=Secret+group+created+successfully.&messageType=success');
     } catch (error: any) {
         console.error("Error creating secret group:", error);
-        res.redirect(`/admin?message=Error+creating+secret+group:+${encodeURIComponent(error.message)}&messageType=error`);
+        let userMessage = "Error+creating+secret+group.+Please+check+server+logs.";
+        if (error.message && error.message.includes("already exists")) {
+            userMessage = "Error+creating+secret+group:+A+group+with+that+name+already+exists.";
+        }
+        res.redirect(`/admin?message=${userMessage}&messageType=error`);
     }
   });
 

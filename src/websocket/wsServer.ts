@@ -210,7 +210,7 @@ export function startWebSocketServer(port: number) {
 
           } catch (error: any) {
             console.error("Registration error:", error);
-            sendWsResponse(ws, "ERROR", WsResponseCodes.INTERNAL_SERVER_ERROR, { detail: `Registration failed: ${error.message}` }, clientRequestId);
+            sendWsResponse(ws, "ERROR", WsResponseCodes.INTERNAL_SERVER_ERROR, { detail: "An internal error occurred during registration. Please try again later or contact support if the issue persists." }, clientRequestId);
           }
           break;
 
@@ -277,7 +277,7 @@ export function startWebSocketServer(port: number) {
                 }
               } catch (error: any) {
                 console.error("Error processing REQUEST_SECRET:", error);
-                sendWsResponse(ws, "ERROR", WsResponseCodes.INTERNAL_SERVER_ERROR, { detail: `Error requesting secret: ${error.message}` }, clientRequestId);
+                sendWsResponse(ws, "ERROR", WsResponseCodes.INTERNAL_SERVER_ERROR, { detail: "An internal error occurred while requesting the secret. Please try again later." }, clientRequestId);
               }
               break;
 
@@ -287,7 +287,7 @@ export function startWebSocketServer(port: number) {
                 sendWsResponse(ws, "AUTHORIZED_SECRETS_LIST", WsResponseCodes.OK, { authorizedSecretKeys: authorizedKeys }, clientRequestId);
               } catch (error: any) {
                 console.error("Error processing LIST_AUTHORIZED_SECRETS:", error);
-                sendWsResponse(ws, "ERROR", WsResponseCodes.INTERNAL_SERVER_ERROR, { detail: `Error listing authorized secrets: ${error.message}` }, clientRequestId);
+                sendWsResponse(ws, "ERROR", WsResponseCodes.INTERNAL_SERVER_ERROR, { detail: "An internal error occurred while listing authorized secrets. Please try again later." }, clientRequestId);
               }
               break;
 
