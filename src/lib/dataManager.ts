@@ -3,6 +3,11 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto'; // For generating client IDs and tokens
 import { encrypt, decrypt, deriveMasterKey, generateSalt } from './encryption';
+import { fileURLToPath } from 'url'; // Added for __dirname replacement
+
+// Helper to get __dirname in ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DATA_DIR = path.join(__dirname, '../../data');
 const DATA_FILE_NAME = 'secrets.json.enc';
@@ -78,7 +83,7 @@ async function loadData(): Promise<void> {
     const encryptedData = await fs.readFile(DATA_FILE_PATH, 'utf-8');
     if (encryptedData.trim() === '') {
         console.log('Data file is empty. Initializing with an empty store.');
-        dataStore = {};
+        dataStore = { secrets: {}, clients: {} }; // Ensure it matches SecureDataStore type
         return;
     }
     const decryptedJson = decrypt(encryptedData, masterEncryptionKey);
@@ -238,15 +243,8 @@ export async function addPendingClient(
  * @returns The updated ClientInfo object with the new authToken.
  */
 export async function approveClient(clientId: string): Promise<ClientInfo> {
-  const client = dataStore.clients[clientId];
-  if (!clientId || typeof clientId !== 'string') throw new Error("Client ID must be a non-empty string.");
-  if (!secretKey || typeof secretKey !== 'string') throw new Error("Secret key must be a non-empty string.");
-
   if (!clientId || typeof clientId !== 'string' || clientId.trim() === "") {
     throw new Error("Client ID must be a non-empty string.");
-  }
-  if (!secretKey || typeof secretKey !== 'string' || secretKey.trim() === "") {
-    throw new Error("Secret key must be a non-empty string.");
   }
 
   const client = dataStore.clients[clientId];

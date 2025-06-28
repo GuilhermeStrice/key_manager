@@ -1,5 +1,5 @@
 // WebSocket server logic
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws'; // Import WebSocketServer as well
 import * as DataManager from '../lib/dataManager';
 
 // Extend WebSocket instance type to hold authentication state
@@ -9,13 +9,13 @@ interface AuthenticatedWebSocket extends WebSocket {
 }
 
 export function startWebSocketServer(port: number) {
-  const wss = new WebSocket.Server({ port });
+  const wss = new WebSocketServer({ port }); // Use WebSocketServer for server creation
 
   wss.on('connection', (ws: AuthenticatedWebSocket) => {
     console.log('Client connected to WebSocket server');
     ws.isAuthenticated = false;
 
-    ws.on('message', async (messageData) => {
+    ws.on('message', async (messageData: WebSocket.RawData, isBinary: boolean) => { // Add types for messageData and isBinary
       let parsedMessage;
       try {
         // Ensure messageData is a string before parsing
@@ -144,7 +144,7 @@ export function startWebSocketServer(port: number) {
       console.log(`Client ${ws.clientInfo ? ws.clientInfo.name + ' (' + ws.clientInfo.id + ')' : 'Unknown'} disconnected from WebSocket server`);
     });
 
-    ws.on('error', (error) => {
+    ws.on('error', (error: Error) => { // Add Error type for error
       console.error(`WebSocket error for client ${ws.clientInfo ? ws.clientInfo.name : 'Unknown'}:`, error);
     });
 

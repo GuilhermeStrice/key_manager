@@ -32,7 +32,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
   // Simple password protection for all /admin routes
   // TODO: Implement proper session-based authentication for the admin panel
-  const adminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const adminAuth = (req: express.Request, res: express.Response, next: express.NextFunction): any => {
     if (!serverAdminPasswordSingleton) {
         console.warn('Admin password not set for HTTP server. Admin routes will be inaccessible.');
         return res.status(500).send('Admin interface not configured.');
@@ -121,27 +121,38 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
 
   // Protected admin route
-  app.get('/admin', adminAuth, async (req, res) => {
-    try {
-      const allKeys = DataManager.getAllSecretKeys(); // Updated function name
-      const secrets = allKeys.map(key => ({
-        key,
-        value: DataManager.getSecretItem(key) // Updated function name
-      }));
-      const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
-      const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
+  app.get('/admin', adminAuth, (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    (async () => {
+      try {
+        const allKeys = DataManager.getAllSecretKeys(); // Updated function name
+        const secrets = allKeys.map(key => ({
+          key: key,
+          value: DataManager.getSecretItem(key)
+        }));
+        const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
+        const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
 
-      res.render('admin', {
-        secrets,
-        password: currentPassword,
-        message,
-        editingItemKey: null,
-        itemToEdit: null
-      });
-    } catch (error) {
-      console.error("Error rendering admin page:", error);
-      res.status(500).send("Error loading admin page.");
-    }
+        res.render('admin', {
+          secrets,
+          password: currentPassword,
+          message,
+          editingItemKey: null,
+          itemToEdit: null
+        });
+      } catch (error) {
+        console.error("Error rendering admin page:", error);
+        if (!res.headersSent) {
+          res.status(500).send("Error loading admin page.");
+        }
+      }
+    })().catch(err => {
+      console.error("Unhandled error in /admin route:", err);
+      if (!res.headersSent) {
+        res.status(500).send("An unexpected error occurred.");
+      }
+      // Optionally call next(err) if you have specific error handling middleware
+      // next(err);
+    });
   });
 
   // Route to show edit form

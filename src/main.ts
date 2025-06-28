@@ -4,6 +4,7 @@ import { initializeDataManager } from './lib/dataManager';
 import { startHttpServer } from './http/httpServer';
 import { startWebSocketServer } from './websocket/wsServer';
 import dotenv from 'dotenv';
+import WebSocket from 'ws'; // Import WebSocket
 
 // Load environment variables from .env file
 dotenv.config();
@@ -36,7 +37,7 @@ async function getPassword(): Promise<string> {
         process.exit(0);
     });
 
-    rl.question('Enter the master password for the server: ', (password) => {
+    rl.question('Enter the master password for the server: ', (password: string) => {
       rl.close();
       if (!password) {
         // If running in a non-interactive environment and password is required but not provided via env.
@@ -89,8 +90,8 @@ function gracefulShutdown(signal: string) {
     // Close WebSocket server connections
     if (wsServerInstance) {
         console.log('Closing WebSocket server...');
-        wsServerInstance.clients.forEach(client => client.close());
-        wsServerInstance.close((err) => {
+        wsServerInstance.clients.forEach((client: WebSocket) => client.close()); // Added WebSocket type
+        wsServerInstance.close((err?: Error) => { // Added Error type for err
             if (err) {
                 console.error('Error closing WebSocket server:', err);
             } else {
