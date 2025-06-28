@@ -12,7 +12,8 @@ const HTTP_PORT = parseInt(process.env.HTTP_PORT || '3000', 10);
 const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
 
 // Store servers for graceful shutdown
-let httpServerInstance: ReturnType<typeof startHttpServer> | null = null;
+// httpServerInstance will be Promise<ReturnType<typeof startHttpServer>> due to async startHttpServer
+let httpServerInstance: Awaited<ReturnType<typeof startHttpServer>> | null = null;
 let wsServerInstance: ReturnType<typeof startWebSocketServer> | null = null;
 
 
@@ -73,7 +74,8 @@ async function startServer() {
   }
 
   console.log(`Attempting to start HTTP server on port ${HTTP_PORT}...`);
-  httpServerInstance = startHttpServer(HTTP_PORT, password);
+  // startHttpServer is now async, so we need to await it.
+  httpServerInstance = await startHttpServer(HTTP_PORT, password);
 
   console.log(`Attempting to start WebSocket server on port ${WS_PORT}...`);
   wsServerInstance = startWebSocketServer(WS_PORT);

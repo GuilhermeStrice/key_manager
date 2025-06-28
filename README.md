@@ -253,23 +253,28 @@ Manual testing of the Admin UI and WebSocket API is recommended using the `clien
 ## Security Considerations
 
 *   **Master Password**: The security of all your encrypted data relies on the strength of your master password and its protection.
-*   **Auth Tokens**: Client authentication tokens are bearer tokens. They should be treated as sensitive credentials and protected by the client applications.
-*   **HTTPS/WSS**: For production deployments, always run the HTTP and WebSocket servers over HTTPS and WSS respectively to protect data in transit, including the master password during admin login and auth tokens. This setup does not include HTTPS/WSS by default.
-*   **Data Directory**: The `data/` directory (containing `secrets.json.enc` and `masterkey.salt`) should have restricted file permissions and be regularly backed up. It is ignored by git by default.
+*   **Auth Tokens**: Client authentication tokens are bearer tokens. They should be treated as sensitive credentials and protected by the client applications. (Note: WebSocket authentication has moved to a sessionless, approval-based model).
+*   **HTTPS/WSS**: For production deployments, always run the HTTP and WebSocket servers over HTTPS and WSS respectively to protect data in transit, including the master password during admin login. This setup does not include HTTPS/WSS by default.
+*   **Data Directory**: The `data/` directory (containing `secrets.json.enc`, `masterkey.salt`, and `runtime-config.json`) should have restricted file permissions and be regularly backed up. It is ignored by git by default.
 *   **Input Validation**: While basic validation is in place, thorough validation of all inputs (admin UI, WebSocket messages) is crucial for robust security.
-*   `Rate Limiting/Brute-Force Protection`: Implemented for HTTP admin endpoints and WebSocket messages. These are configurable via environment variables (see Environment Variables section).
+*   **Rate Limiting/Brute-Force Protection**: Implemented for HTTP admin endpoints and WebSocket messages. These are configurable via environment variables (see Environment Variables section).
+*   **Runtime Configuration**: Settings like the WebSocket auto-approval flag are stored in `data/runtime-config.json` and are persistent across server restarts.
 
 ## Project Structure
 
 ```
 .
-├── data/                  # Encrypted data and salt (gitignored)
+├── data/                  # Encrypted data, salt, and runtime config (gitignored)
+│   ├── secrets.json.enc
+│   ├── masterkey.salt
+│   └── runtime-config.json
 ├── dist/                  # Compiled JavaScript output
 ├── node_modules/          # Dependencies (gitignored)
 ├── src/                   # TypeScript source files
 │   ├── http/              # HTTP server (Express) and Admin UI logic
 │   │   └── httpServer.ts
 │   ├── lib/               # Core libraries
+│   │   ├── configManager.ts # Runtime configuration management
 │   │   ├── dataManager.ts   # Data storage, encryption/decryption logic
 │   │   ├── dataManager.spec.ts # Unit tests for DataManager
 │   │   └── encryption.ts    # Low-level encryption utilities

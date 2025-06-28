@@ -9,6 +9,7 @@ import session from 'express-session'; // For CSRF
 import csrf from 'csurf'; // For CSRF
 import crypto from 'crypto'; // For generating temporary session secret
 import * as DataManager from '../lib/dataManager'; // Import DataManager functions
+import * as ConfigManager from '../lib/configManager'; // Import ConfigManager functions
 import { notifyClientStatusUpdate } from '../websocket/wsServer'; // Import notification function
 
 // This is a very basic way to hold the password for the session.
@@ -26,7 +27,12 @@ if (JWT_SECRET === 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD') {
 const ADMIN_COOKIE_NAME = 'admin_token';
 
 
-export function startHttpServer(port: number, serverAdminPassword?: string) {
+export async function startHttpServer(port: number, serverAdminPassword?: string) {
+  // Load runtime configuration first
+  const runtimeConfig = await ConfigManager.loadConfiguration();
+  autoApproveWebSocketRegistrations = runtimeConfig.autoApproveWebSocketRegistrations;
+  console.log(`Initial autoApproveWebSocketRegistrations state: ${autoApproveWebSocketRegistrations}`);
+
   const app = express();
 
   // Use Helmet for basic security headers
@@ -325,13 +331,24 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     res.json({ autoApproveEnabled: autoApproveWebSocketRegistrations });
   });
 
-  app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, csrfProtection, (req, res) => { // Added csrfProtection
+  app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection & async
     autoApproveWebSocketRegistrations = !autoApproveWebSocketRegistrations;
     console.log(`WebSocket auto-approval toggled to: ${autoApproveWebSocketRegistrations}`);
-    res.json({
-        autoApproveEnabled: autoApproveWebSocketRegistrations,
-        message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}.`
-    });
+    try {
+        await ConfigManager.saveConfiguration({ autoApproveWebSocketRegistrations });
+        res.json({
+            autoApproveEnabled: autoApproveWebSocketRegistrations,
+            message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}. State saved.`
+        });
+    } catch (error) {
+        console.error("Error saving auto-approve configuration:", error);
+        // Still update in-memory state and respond, but log the error
+        res.status(500).json({
+            autoApproveEnabled: autoApproveWebSocketRegistrations, // Reflects the toggled state
+            message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}. Error saving state.`,
+            error: "Failed to persist setting."
+        });
+    }
   });
 
   // --- Client Management Routes ---
