@@ -5,22 +5,14 @@ import { startHttpServer } from './http/httpServer';
 import { startWebSocketServer } from './websocket/wsServer';
 import dotenv from 'dotenv';
 
-import { loadConfiguration } from './lib/configManager'; // Import loadConfiguration
-
 // Load environment variables from .env file
 dotenv.config();
 
-// Default ports, can be overridden by env vars or config file
-const DEFAULT_HTTP_PORT = 3000;
-const DEFAULT_WS_PORT = 3001;
-
-let HTTP_PORT = parseInt(process.env.HTTP_PORT || `${DEFAULT_HTTP_PORT}`, 10);
-let WS_PORT = parseInt(process.env.WS_PORT || `${DEFAULT_WS_PORT}`, 10);
-
+const HTTP_PORT = parseInt(process.env.HTTP_PORT || '3000', 10);
+const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
 
 // Store servers for graceful shutdown
-// httpServerInstance will be Promise<ReturnType<typeof startHttpServer>> due to async startHttpServer
-let httpServerInstance: Awaited<ReturnType<typeof startHttpServer>> | null = null;
+let httpServerInstance: ReturnType<typeof startHttpServer> | null = null;
 let wsServerInstance: ReturnType<typeof startWebSocketServer> | null = null;
 
 
@@ -60,26 +52,6 @@ async function getPassword(): Promise<string> {
 
 async function startServer() {
   console.log('Starting Key/Info Manager Server...');
-
-  // Load runtime configuration to potentially override ports
-  try {
-    const runtimeConfig = await loadConfiguration();
-    if (runtimeConfig.httpPort) {
-      HTTP_PORT = runtimeConfig.httpPort;
-      console.log(`HTTP port loaded from runtime-config.json: ${HTTP_PORT}`);
-    } else {
-      console.log(`HTTP port not specified in runtime-config.json, using default/env: ${HTTP_PORT}`);
-    }
-    if (runtimeConfig.wsPort) {
-      WS_PORT = runtimeConfig.wsPort;
-      console.log(`WebSocket port loaded from runtime-config.json: ${WS_PORT}`);
-    } else {
-      console.log(`WebSocket port not specified in runtime-config.json, using default/env: ${WS_PORT}`);
-    }
-  } catch (error) {
-    console.warn("Could not load runtime configuration for ports, will use defaults/env variables. Error:", error);
-  }
-
   const password = await getPassword();
 
   if (!password && !process.env.MASTER_PASSWORD) {
@@ -101,8 +73,7 @@ async function startServer() {
   }
 
   console.log(`Attempting to start HTTP server on port ${HTTP_PORT}...`);
-  // startHttpServer is now async, so we need to await it.
-  httpServerInstance = await startHttpServer(HTTP_PORT, password);
+  httpServerInstance = startHttpServer(HTTP_PORT, password);
 
   console.log(`Attempting to start WebSocket server on port ${WS_PORT}...`);
   wsServerInstance = startWebSocketServer(WS_PORT);

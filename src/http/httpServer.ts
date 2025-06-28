@@ -9,7 +9,6 @@ import session from 'express-session'; // For CSRF
 import csrf from 'csurf'; // For CSRF
 import crypto from 'crypto'; // For generating temporary session secret
 import * as DataManager from '../lib/dataManager'; // Import DataManager functions
-import * as ConfigManager from '../lib/configManager'; // Import ConfigManager functions
 import { notifyClientStatusUpdate } from '../websocket/wsServer'; // Import notification function
 
 // This is a very basic way to hold the password for the session.
@@ -19,41 +18,15 @@ let serverAdminPasswordSingleton: string | null = null;
 // Global flag for WebSocket auto-approval (debug purposes)
 export let autoApproveWebSocketRegistrations: boolean = false;
 
-// JWT Secret will be determined after loading runtime config
-let JWT_SECRET: string = '';
+// IMPORTANT: Set a strong, unique JWT_SECRET in your .env file for production!
+const JWT_SECRET = process.env.JWT_SECRET || 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD';
+if (JWT_SECRET === 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD') {
+    console.warn('WARNING: Using default JWT secret. This is NOT secure for production. Set JWT_SECRET in your environment.');
+}
 const ADMIN_COOKIE_NAME = 'admin_token';
-const PLACEHOLDER_JWT_SECRET = 'PLEASE_SET_A_STRONG_JWT_SECRET';
 
 
-export async function startHttpServer(port: number, serverAdminPassword?: string) {
-  // Load runtime configuration first
-  const runtimeConfig = await ConfigManager.loadConfiguration();
-  autoApproveWebSocketRegistrations = runtimeConfig.autoApproveWebSocketRegistrations;
-  console.log(`Initial autoApproveWebSocketRegistrations state: ${autoApproveWebSocketRegistrations}`);
-
-  // Determine JWT_SECRET based on priority: process.env > runtimeConfig > placeholder (with warning)
-  if (process.env.JWT_SECRET) {
-    JWT_SECRET = process.env.JWT_SECRET;
-    console.log('Using JWT_SECRET from environment variable.');
-  } else if (runtimeConfig.jwtSecret && runtimeConfig.jwtSecret !== PLACEHOLDER_JWT_SECRET) {
-    JWT_SECRET = runtimeConfig.jwtSecret;
-    console.log('Using JWT_SECRET from runtime-config.json.');
-  } else {
-    JWT_SECRET = runtimeConfig.jwtSecret; // This would be the placeholder
-    console.warn('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
-    console.warn('WARNING: Using a placeholder JWT secret from runtime-config.json.');
-    console.warn('This is INSECURE and should NOT be used in production.');
-    console.warn('Please set JWT_SECRET in your environment variables or update runtime-config.json');
-    console.warn('with a strong, unique secret.');
-    console.warn('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
-    if (JWT_SECRET !== PLACEHOLDER_JWT_SECRET) { // Should not happen if logic is correct
-        console.error("Error: JWT_SECRET logic inconsistency. Please check configManager.ts defaults and httpServer.ts loading.");
-        // Fallback to a known insecure default to prevent undefined behavior, though this state indicates a bug.
-        JWT_SECRET = 'UNEXPECTED_DEFAULT_FALLBACK_SECRET_BUG';
-    }
-  }
-
-
+export function startHttpServer(port: number, serverAdminPassword?: string) {
   const app = express();
 
   // Use Helmet for basic security headers
@@ -352,43 +325,13 @@ export async function startHttpServer(port: number, serverAdminPassword?: string
     res.json({ autoApproveEnabled: autoApproveWebSocketRegistrations });
   });
 
-  app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, csrfProtection, async (req, res): Promise<void> => {
-    const { enable } = req.body; // Expecting { "enable": boolean }
-
-    if (typeof enable !== 'boolean') {
-      res.status(400).json({ message: "Invalid request body. 'enable' boolean field required." });
-      return;
-    }
-
-    autoApproveWebSocketRegistrations = enable;
-    console.log(`WebSocket auto-approval set in memory to: ${autoApproveWebSocketRegistrations}`);
-
-    try {
-        const currentConfig = await ConfigManager.loadConfiguration();
-        currentConfig.autoApproveWebSocketRegistrations = autoApproveWebSocketRegistrations;
-
-        await ConfigManager.saveConfiguration(currentConfig);
-        console.log(`WebSocket auto-approval state (${autoApproveWebSocketRegistrations}) saved to config file.`);
-
-        res.json({
-            autoApproveEnabled: currentConfig.autoApproveWebSocketRegistrations,
-            message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}. State saved.`
-        });
-        return;
-    } catch (error) {
-        console.error("Error saving auto-approve configuration:", error);
-        // Note: The in-memory state was already updated. If save fails, they are now out of sync.
-        // For robustness, one might revert the in-memory change or retry.
-        // For now, client will get an error, and in-memory value remains what user set.
-        res.status(500).json({
-            // autoApproveEnabled still reflects the intended (now in-memory) state.
-            // UI should ideally reflect that save failed and current state might not be persisted.
-            autoApproveEnabled: autoApproveWebSocketRegistrations,
-            message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}. ERROR SAVING STATE.`,
-            error: "Failed to persist setting."
-        });
-        return;
-    }
+  app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, csrfProtection, (req, res) => { // Added csrfProtection
+    autoApproveWebSocketRegistrations = !autoApproveWebSocketRegistrations;
+    console.log(`WebSocket auto-approval toggled to: ${autoApproveWebSocketRegistrations}`);
+    res.json({
+        autoApproveEnabled: autoApproveWebSocketRegistrations,
+        message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}.`
+    });
   });
 
   // --- Client Management Routes ---
@@ -400,12 +343,6 @@ export async function startHttpServer(port: number, serverAdminPassword?: string
       const approvedClients = DataManager.getApprovedClients();
       // currentPassword from query is removed.
       const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
-
-      console.log('[DEBUG] Rendering /admin/clients:');
-      console.log('[DEBUG] Pending Clients:', JSON.stringify(pendingClients, null, 2));
-      console.log('[DEBUG] Approved Clients:', JSON.stringify(approvedClients, null, 2));
-      console.log('[DEBUG] Message:', message);
-      console.log('[DEBUG] CSRF Token will be generated.');
 
       res.render('clients', {
         pendingClients,
