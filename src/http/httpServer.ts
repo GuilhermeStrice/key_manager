@@ -11,6 +11,9 @@ import { notifyClientStatusUpdate } from '../websocket/wsServer'; // Import noti
 // In a more complex app, this would be handled more securely, perhaps not stored directly.
 let serverAdminPasswordSingleton: string | null = null;
 
+// Global flag for WebSocket auto-approval (debug purposes)
+export let autoApproveWebSocketRegistrations: boolean = false;
+
 // IMPORTANT: Set a strong, unique JWT_SECRET in your .env file for production!
 const JWT_SECRET = process.env.JWT_SECRET || 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD';
 if (JWT_SECRET === 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD') {
@@ -249,6 +252,20 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
       console.error("Error deleting secret:", error);
       res.redirect(`/admin?message=Error+deleting+secret:+${encodeURIComponent(error.message)}&messageType=error`);
     }
+  });
+
+  // --- WebSocket Auto-Approval Setting Routes ---
+  app.get('/admin/settings/auto-approve-ws-status', adminAuth, (req, res) => {
+    res.json({ autoApproveEnabled: autoApproveWebSocketRegistrations });
+  });
+
+  app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, (req, res) => {
+    autoApproveWebSocketRegistrations = !autoApproveWebSocketRegistrations;
+    console.log(`WebSocket auto-approval toggled to: ${autoApproveWebSocketRegistrations}`);
+    res.json({
+        autoApproveEnabled: autoApproveWebSocketRegistrations,
+        message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}.`
+    });
   });
 
   // --- Client Management Routes ---
