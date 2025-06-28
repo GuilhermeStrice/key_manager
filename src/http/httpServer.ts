@@ -10,19 +10,20 @@ import csrf from 'csurf'; // For CSRF
 import crypto from 'crypto'; // For generating temporary session secret
 import * as DataManager from '../lib/dataManager'; // Import DataManager functions
 import { notifyClientStatusUpdate } from '../websocket/wsServer'; // Import notification function
+import { getConfig, updateAutoApproveSetting } from '../lib/configManager'; // Import configManager functions
 
 // This is a very basic way to hold the password for the session.
 // In a more complex app, this would be handled more securely, perhaps not stored directly.
 let serverAdminPasswordSingleton: string | null = null;
 
-// Global flag for WebSocket auto-approval (debug purposes)
-export let autoApproveWebSocketRegistrations: boolean = false;
+// Global flag for WebSocket auto-approval is now managed by configManager
+// export let autoApproveWebSocketRegistrations: boolean = false;
 
-// IMPORTANT: Set a strong, unique JWT_SECRET in your .env file for production!
-const JWT_SECRET = process.env.JWT_SECRET || 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD';
-if (JWT_SECRET === 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD') {
-    console.warn('WARNING: Using default JWT secret. This is NOT secure for production. Set JWT_SECRET in your environment.');
-}
+// JWT_SECRET is now managed by configManager
+// const JWT_SECRET = process.env.JWT_SECRET || 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD';
+// if (JWT_SECRET === 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD' && getConfig().jwtSecret === 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD') {
+    // Warning is handled by configManager
+// }
 const ADMIN_COOKIE_NAME = 'admin_token';
 
 
@@ -127,7 +128,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     const tokenCookie = req.cookies[ADMIN_COOKIE_NAME];
     if (tokenCookie) {
         try {
-            jwt.verify(tokenCookie, JWT_SECRET); // Throws error if invalid
+            jwt.verify(tokenCookie, getConfig().jwtSecret); // Throws error if invalid
             // Optional: req.user = decoded;
             return next(); // Valid JWT cookie, allow access
         } catch (err: any) { // Type err as any to allow accessing err.message
@@ -176,7 +177,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   app.post('/admin/login', loginLimiter, express.urlencoded({ extended: false }), (req, res) => {
      if (req.body.password && req.body.password === serverAdminPasswordSingleton) {
         // Generate JWT
-        const token = jwt.sign({ admin: true, user: 'admin' }, JWT_SECRET, { expiresIn: '1h' });
+        const token = jwt.sign({ admin: true, user: 'admin' }, getConfig().jwtSecret, { expiresIn: '1h' });
         // Set cookie options: httpOnly for security, secure in production, path for admin routes
         const cookieOptions: express.CookieOptions = {
             httpOnly: true,
@@ -322,14 +323,16 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
   // --- WebSocket Auto-Approval Setting Routes ---
   app.get('/admin/settings/auto-approve-ws-status', adminAuth, (req, res) => {
-    res.json({ autoApproveEnabled: autoApproveWebSocketRegistrations });
+    // This route might still be useful for other API consumers, so it uses getConfig()
+    res.json({ autoApproveEnabled: getConfig().autoApproveWebSocketRegistrations });
   });
 
   app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, csrfProtection, (req, res) => { // Added csrfProtection
     // If checkbox is checked, req.body.autoApproveWs will be 'on' (or its 'value' attribute if set).
     // If unchecked, autoApproveWs will not be in req.body.
-    autoApproveWebSocketRegistrations = !!req.body.autoApproveWs;
-    console.log(`WebSocket auto-approval toggled to: ${autoApproveWebSocketRegistrations}`);
+    const newAutoApproveState = !!req.body.autoApproveWs;
+    updateAutoApproveSetting(newAutoApproveState); // Update and save config
+    console.log(`WebSocket auto-approval toggled to: ${newAutoApproveState}`);
     // Instead of JSON, redirect back to the clients page
     res.redirect('/admin/clients?message=WebSocket+auto-approval+setting+updated&messageType=success');
   });
@@ -350,7 +353,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         password: '', // EJS links will be updated
         message,
         managingClientSecrets: null, // Not managing specific client secrets by default
-        autoApproveWsEnabled: autoApproveWebSocketRegistrations, // Pass current state to template
+        autoApproveWsEnabled: getConfig().autoApproveWebSocketRegistrations, // Pass current state to template
         csrfToken: req.csrfToken() // Pass CSRF token to template
       });
     } catch (error) {

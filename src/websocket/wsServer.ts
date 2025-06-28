@@ -1,7 +1,7 @@
 // WebSocket server logic
 import WebSocket from 'ws';
 import * as DataManager from '../lib/dataManager';
-import { autoApproveWebSocketRegistrations } from '../http/httpServer'; // Import the flag
+import { getConfig } from '../lib/configManager'; // Import getConfig
 
 // Extend WebSocket instance type to hold authentication state and rate limit data
 interface AuthenticatedWebSocket extends WebSocket {
@@ -197,7 +197,7 @@ export function startWebSocketServer(port: number) {
             console.log(`Client "${newClient.name}" (ID: ${newClient.id}) registration submitted.`);
 
             // Auto-approve if flag is set
-            if (autoApproveWebSocketRegistrations) {
+            if (getConfig().autoApproveWebSocketRegistrations) {
               console.log(`Auto-approving client ${newClient.id} (debug mode).`);
               try {
                 await DataManager.approveClient(newClient.id);
