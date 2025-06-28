@@ -50,6 +50,7 @@
                 <input type="checkbox" id="autoApproveWsToggle">
                 Automatically Approve New WebSocket Registrations
             </label>
+            <button id="saveWsSettingsBtn" style="margin-left: 15px;">Save Setting</button>
             <span id="autoApproveStatus" style="margin-left: 10px; font-style: italic;"></span>
         </div>
         <% } %>
@@ -162,48 +163,64 @@
         document.addEventListener('DOMContentLoaded', () => {
             const autoApproveToggle = document.getElementById('autoApproveWsToggle');
             const autoApproveStatusSpan = document.getElementById('autoApproveStatus');
+            const saveWsSettingsBtn = document.getElementById('saveWsSettingsBtn');
 
-            if (autoApproveToggle) { // Only run if the toggle is on the page (i.e., not on secret management view)
+            if (autoApproveToggle && saveWsSettingsBtn) { // Check for button as well
                 // Fetch initial status
-                fetch('/admin/settings/auto-approve-ws-status')
-                    .then(response => response.json())
-                    .then(data => {
-                        autoApproveToggle.checked = data.autoApproveEnabled;
-                        autoApproveStatusSpan.textContent = data.autoApproveEnabled ? 'Enabled' : 'Disabled';
-                    })
-                    .catch(error => {
-                        console.error('Error fetching auto-approve status:', error);
-                        autoApproveStatusSpan.textContent = 'Error loading status.';
-                    });
+                const fetchInitialStatus = () => {
+                    fetch('/admin/settings/auto-approve-ws-status')
+                        .then(response => response.json())
+                        .then(data => {
+                            autoApproveToggle.checked = data.autoApproveEnabled;
+                            autoApproveStatusSpan.textContent = data.autoApproveEnabled ? 'Enabled' : 'Disabled (click to change, then save)';
+                        })
+                        .catch(error => {
+                            console.error('Error fetching auto-approve status:', error);
+                            autoApproveStatusSpan.textContent = 'Error loading status.';
+                        });
+                };
+                fetchInitialStatus(); // Load status on page load
 
-                // Add event listener for changes
+                // Update status text when checkbox is clicked (but don't save yet)
                 autoApproveToggle.addEventListener('change', () => {
-                    autoApproveStatusSpan.textContent = 'Updating...';
-                    fetch('/admin/settings/toggle-auto-approve-ws', {
+                    autoApproveStatusSpan.textContent = autoApproveToggle.checked ? 'Pending save: Enabled' : 'Pending save: Disabled';
+                });
+
+                // Add event listener for the save button
+                saveWsSettingsBtn.addEventListener('click', () => {
+                    autoApproveStatusSpan.textContent = 'Saving...';
+                    const newStatus = autoApproveToggle.checked;
+
+                    fetch('/admin/settings/toggle-auto-approve-ws', { // Endpoint remains the same, but behavior changed
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            'CSRF-Token': csrfToken // Add CSRF token to headers
-                        }
-                        // No body needed for this specific toggle POST request
+                            'CSRF-Token': csrfToken
+                        },
+                        body: JSON.stringify({ enable: newStatus }) // Send the new state
                     })
                     .then(response => {
                         if (!response.ok) {
-                            // Handle HTTP errors like 403 Forbidden if CSRF fails server-side
-                            throw new Error(`HTTP error! status: ${response.status}`);
+                            // Try to parse error message from server if available
+                            return response.json().then(errData => {
+                                throw new Error(errData.message || `HTTP error! status: ${response.status}`);
+                            }).catch(() => {
+                                // If no JSON error body, throw generic error
+                                throw new Error(`HTTP error! status: ${response.status}`);
+                            });
                         }
                         return response.json();
                     })
                     .then(data => {
                         autoApproveToggle.checked = data.autoApproveEnabled;
-                        autoApproveStatusSpan.textContent = data.autoApproveEnabled ? 'Enabled' : 'Disabled';
-                        // Optionally, display data.message as an alert or temporary message
-                        console.log(data.message);
+                        autoApproveStatusSpan.textContent = (data.message || (data.autoApproveEnabled ? 'Enabled' : 'Disabled'));
+                        console.log(data.message); // Log success/failure message from server
                     })
                     .catch(error => {
-                        console.error('Error toggling auto-approve:', error);
-                        autoApproveStatusSpan.textContent = 'Error updating status.';
-                        // Revert checkbox on error? Or fetch status again? For now, just log.
+                        console.error('Error saving auto-approve setting:', error);
+                        autoApproveStatusSpan.textContent = `Error: ${error.message}. Current server state might be unchanged.`;
+                        // Optionally, re-fetch status to ensure UI consistency
+                        // fetchInitialStatus();
                     });
                 });
             }
