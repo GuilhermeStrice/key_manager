@@ -46,11 +46,14 @@
         <% if (!managingClientSecrets) { %>
         <div style="margin-bottom: 20px; padding: 10px; border: 1px solid #eee; background-color: #f9f9f9;">
             <h3>WebSocket Settings (Debug)</h3>
-            <label for="autoApproveWsToggle">
-                <input type="checkbox" id="autoApproveWsToggle">
-                Automatically Approve New WebSocket Registrations
-            </label>
-            <span id="autoApproveStatus" style="margin-left: 10px; font-style: italic;"></span>
+            <form action="/admin/settings/toggle-auto-approve-ws" method="POST">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <label for="autoApproveWsToggle">
+                    <input type="checkbox" id="autoApproveWsToggle" name="autoApproveWs" <%= autoApproveWsEnabled ? 'checked' : '' %>>
+                    Automatically Approve New WebSocket Registrations
+                </label>
+                <button type="submit" class="btn" style="margin-left: 10px;">Update Setting</button>
+            </form>
         </div>
         <% } %>
 
@@ -152,62 +155,9 @@
         <% } %>
     </div>
 
-    <script>
-        // Make CSRF token available to client-side JavaScript
-        // This script block should be within the body, ideally after the main content,
-        // or ensure csrfToken is defined if it's in the head.
-        // Given it's at the end of the body, this is fine.
-        const csrfToken = "<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>";
+    <%# The script for auto-approve toggle has been removed as it's now a form submission %>
+    <%# The csrfToken is still available globally in the template if other scripts need it, %>
+    <%# passed directly from the route handler. %>
 
-        document.addEventListener('DOMContentLoaded', () => {
-            const autoApproveToggle = document.getElementById('autoApproveWsToggle');
-            const autoApproveStatusSpan = document.getElementById('autoApproveStatus');
-
-            if (autoApproveToggle) { // Only run if the toggle is on the page (i.e., not on secret management view)
-                // Fetch initial status
-                fetch('/admin/settings/auto-approve-ws-status')
-                    .then(response => response.json())
-                    .then(data => {
-                        autoApproveToggle.checked = data.autoApproveEnabled;
-                        autoApproveStatusSpan.textContent = data.autoApproveEnabled ? 'Enabled' : 'Disabled';
-                    })
-                    .catch(error => {
-                        console.error('Error fetching auto-approve status:', error);
-                        autoApproveStatusSpan.textContent = 'Error loading status.';
-                    });
-
-                // Add event listener for changes
-                autoApproveToggle.addEventListener('change', () => {
-                    autoApproveStatusSpan.textContent = 'Updating...';
-                    fetch('/admin/settings/toggle-auto-approve-ws', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'CSRF-Token': csrfToken // Add CSRF token to headers
-                        }
-                        // No body needed for this specific toggle POST request
-                    })
-                    .then(response => {
-                        if (!response.ok) {
-                            // Handle HTTP errors like 403 Forbidden if CSRF fails server-side
-                            throw new Error(`HTTP error! status: ${response.status}`);
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        autoApproveToggle.checked = data.autoApproveEnabled;
-                        autoApproveStatusSpan.textContent = data.autoApproveEnabled ? 'Enabled' : 'Disabled';
-                        // Optionally, display data.message as an alert or temporary message
-                        console.log(data.message);
-                    })
-                    .catch(error => {
-                        console.error('Error toggling auto-approve:', error);
-                        autoApproveStatusSpan.textContent = 'Error updating status.';
-                        // Revert checkbox on error? Or fetch status again? For now, just log.
-                    });
-                });
-            }
-        });
-    </script>
 </body>
 </html>

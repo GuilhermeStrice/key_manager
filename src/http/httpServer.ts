@@ -326,12 +326,12 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   });
 
   app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, csrfProtection, (req, res) => { // Added csrfProtection
-    autoApproveWebSocketRegistrations = !autoApproveWebSocketRegistrations;
+    // If checkbox is checked, req.body.autoApproveWs will be 'on' (or its 'value' attribute if set).
+    // If unchecked, autoApproveWs will not be in req.body.
+    autoApproveWebSocketRegistrations = !!req.body.autoApproveWs;
     console.log(`WebSocket auto-approval toggled to: ${autoApproveWebSocketRegistrations}`);
-    res.json({
-        autoApproveEnabled: autoApproveWebSocketRegistrations,
-        message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}.`
-    });
+    // Instead of JSON, redirect back to the clients page
+    res.redirect('/admin/clients?message=WebSocket+auto-approval+setting+updated&messageType=success');
   });
 
   // --- Client Management Routes ---
@@ -350,6 +350,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         password: '', // EJS links will be updated
         message,
         managingClientSecrets: null, // Not managing specific client secrets by default
+        autoApproveWsEnabled: autoApproveWebSocketRegistrations, // Pass current state to template
         csrfToken: req.csrfToken() // Pass CSRF token to template
       });
     } catch (error) {
