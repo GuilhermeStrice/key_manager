@@ -92,6 +92,10 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   // Middleware for parsing cookies
   app.use(cookieParser());
 
+  // Middleware for serving static files (e.g., CSS, client-side JS)
+  // __dirname is src/http, so ../../public points to the project's public directory
+  app.use(express.static(path.join(__dirname, '../../public')));
+
   // Session middleware configuration (needed for csurf)
   // IMPORTANT: Use a strong, unique secret from environment variables in production
   const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');

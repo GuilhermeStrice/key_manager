@@ -3,26 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Admin - Key/Info Management</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
-        .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        h1, h2 { color: #333; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
-        th { background-color: #f0f0f0; }
-        .actions a, .actions button { margin-right: 5px; text-decoration: none; color: #007bff; border: none; background: none; cursor: pointer; padding: 5px; }
-        .actions button.delete { color: #dc3545; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; }
-        .form-group input[type="text"], .form-group textarea { width: calc(100% - 22px); padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
-        .form-group textarea { min-height: 80px; }
-        .btn { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }
-        .btn-danger { background-color: #dc3545; }
-        .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
-        .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .alert-error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .auth-param { display: none; } /* For password query param if needed */
-    </style>
+    <link rel="stylesheet" href="/css/admin_styles.css">
 </head>
 <body>
     <div class="container">
@@ -30,7 +11,7 @@
         <div class="nav-links">
             <a href="/admin">Manage Secrets</a>
             <a href="/admin/clients">Manage Clients</a>
-            <a href="/admin/logout" style="float: right;">Logout</a>
+            <a href="/admin/logout" class="logout-link">Logout</a>
         </div>
 
         <% if (message && message.text) { %>
@@ -56,7 +37,7 @@
                     <label>Belongs to Group:</label>
                     <p>
                         <strong><%= itemToEdit.groupName %></strong> (ID: <%= itemToEdit.groupId %>)
-                        <% if (!itemToEdit.groupId) { %> <span style="color:red;">(Warning: No group assigned or group missing!)</span> <% } %>
+                        <% if (!itemToEdit.groupId) { %> <span class="text-danger">(Warning: No group assigned or group missing!)</span> <% } %>
                     </p>
                 </div>
                 <div class="form-group">
@@ -96,25 +77,25 @@
         <% } %>
 
         <% if (typeof editingGroup !== 'undefined' && editingGroup) { %>
-        <hr style="margin: 30px 0;">
+        <hr>
         <h2>Rename Secret Group: <%= editingGroup.name %> (ID: <%= editingGroup.id %>)</h2>
-        <form action="/admin/groups/rename/<%= editingGroup.id %>" method="POST" style="margin-bottom: 20px;">
+        <form action="/admin/groups/rename/<%= editingGroup.id %>" method="POST" class="mb-3">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <div class="form-group">
                 <label for="newGroupName">New Group Name:</label>
                 <input type="text" id="newGroupName" name="newGroupName" value="<%= editingGroup.name %>" required>
             </div>
             <button type="submit" class="btn">Rename Group</button>
-            <a href="/admin" class="btn btn-secondary" style="margin-left: 10px;">Cancel</a>
+            <a href="/admin" class="btn btn-secondary ml-2">Cancel</a>
         </form>
         <% } %>
 
-        <hr style="margin: 30px 0;">
+        <hr>
 
         <h2>Secret Groups</h2>
 
         <h3>Create New Secret Group</h3>
-        <form action="/admin/groups/create" method="POST" style="margin-bottom: 20px;">
+        <form action="/admin/groups/create" method="POST" class="mb-3">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <div class="form-group">
                 <label for="groupName">Group Name:</label>
@@ -142,8 +123,8 @@
                             <td><%= group.keys.length %></td>
                             <td class="actions">
                                 <a href="/admin/groups/<%= group.id %>/secrets">View/Manage Secrets</a>
-                                <a href="/admin/groups/edit/<%= group.id %>">Rename</a>
-                                <form action="/admin/groups/delete/<%= group.id %>" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete the group \"<%= group.name %>\" (ID: <%= group.id %>)? All secrets within this group will also be permanently deleted.');">
+                                <a href="/admin/groups/edit/<%= group.id %>" class="ml-2">Rename</a>
+                                <form action="/admin/groups/delete/<%= group.id %>" method="POST" class="form-inline" onsubmit="return confirm('Are you sure you want to delete the group \"<%= group.name %>\" (ID: <%= group.id %>)? All secrets within this group will also be permanently deleted.');">
                                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                                     <button type="submit" class="delete">Delete</button>
                                 </form>
@@ -182,7 +163,7 @@
                             </td>
                             <td class="actions">
                                 <a href="/admin/edit-secret/<%= encodeURIComponent(secret.key) %>">Edit</a>
-                                <form action="/admin/delete-secret/<%= encodeURIComponent(secret.key) %>" method="POST" style="display:inline;">
+                                <form action="/admin/delete-secret/<%= encodeURIComponent(secret.key) %>" method="POST" class="form-inline">
                                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                                     <button type="submit" class="delete">Delete</button>
                                 </form>
