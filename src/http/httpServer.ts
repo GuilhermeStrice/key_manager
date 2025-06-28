@@ -791,7 +791,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     try {
       const { name } = req.body;
       if (!name) {
-        return res.status(400).json({ error: 'Group name is required.' });
+        res.status(400).json({ error: 'Group name is required.' });
+        return;
       }
       const newGroup = await createSecretGroup(name); // Use direct import
       res.status(201).json(newGroup);
@@ -828,7 +829,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     try {
       const groupId = parseInt(req.params.groupId, 10);
       if (isNaN(groupId)) {
-        return res.status(400).json({ error: 'Invalid group ID format.' });
+        res.status(400).json({ error: 'Invalid group ID format.' });
+        return;
       }
       const group = getSecretGroupById(groupId); // Use direct import
       if (group) {
@@ -846,10 +848,12 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
       const groupId = parseInt(req.params.groupId, 10);
       const { name } = req.body;
       if (isNaN(groupId)) {
-        return res.status(400).json({ error: 'Invalid group ID format.' });
+        res.status(400).json({ error: 'Invalid group ID format.' });
+        return;
       }
       if (!name) {
-        return res.status(400).json({ error: 'New group name is required.' });
+        res.status(400).json({ error: 'New group name is required.' });
+        return;
       }
       await renameSecretGroup(groupId, name); // Use direct import
       res.status(200).json({ message: 'Group renamed successfully.' });
@@ -862,7 +866,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     try {
       const groupId = parseInt(req.params.groupId, 10);
       if (isNaN(groupId)) {
-        return res.status(400).json({ error: 'Invalid group ID format.' });
+        res.status(400).json({ error: 'Invalid group ID format.' });
+        return;
       }
       await deleteSecretGroup(groupId); // Use direct import
       res.status(200).json({ message: 'Group and its secrets deleted successfully.' });
@@ -876,7 +881,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     try {
       const { groupId, key, value } = req.body;
       if (typeof groupId !== 'number' || !key || value === undefined) {
-        return res.status(400).json({ error: 'groupId (number), key (string), and value are required.' });
+        res.status(400).json({ error: 'groupId (number), key (string), and value are required.' });
+        return;
       }
       await createSecretInGroup(groupId, key, value); // Use direct import
       res.status(201).json({ message: 'Secret created successfully in group.' });
@@ -890,7 +896,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
       const { key } = req.params;
       const { value } = req.body;
       if (value === undefined) {
-        return res.status(400).json({ error: 'New value is required.' });
+        res.status(400).json({ error: 'New value is required.' });
+        return;
       }
       await updateSecretValue(key, value); // Use direct import
       res.status(200).json({ message: 'Secret value updated successfully.' });
