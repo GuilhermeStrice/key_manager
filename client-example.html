@@ -25,9 +25,7 @@
     <hr>
     <div>
         <h3>Client State:</h3>
-        <p>Client ID: <span id="clientIdSpan">N/A</span></p>
-        <p>Temporary ID: <span id="tempIdSpan">N/A</span></p>
-        <p>Auth Token: <input type="text" id="authTokenInput" placeholder="Enter auth token if known" size="40"></p>
+        <p>Server-Assigned Client ID: <span id="clientIdSpan">N/A</span></p>
         <p>Status: <span id="clientStatusSpan">Disconnected</span></p>
     </div>
     <hr>
@@ -36,8 +34,7 @@
         <input type="text" id="clientNameInput" placeholder="Your Client Name (for registration)">
         <button id="registerBtn" disabled>Register Client</button>
         <br><br>
-        <button id="authenticateBtn" disabled>Authenticate with Token</button>
-        <br><br>
+        <!-- Authenticate button removed -->
         <input type="text" id="secretKeyInput" placeholder="Secret Key to Request">
         <button id="requestSecretBtn" disabled>Request Secret</button>
         <br><br>
@@ -59,8 +56,8 @@
 
         const registerBtn = document.getElementById('registerBtn');
         const clientNameInput = document.getElementById('clientNameInput');
-        const authenticateBtn = document.getElementById('authenticateBtn');
-        const authTokenInput = document.getElementById('authTokenInput');
+        // const authenticateBtn = document.getElementById('authenticateBtn'); // Removed
+        // const authTokenInput = document.getElementById('authTokenInput'); // Removed
         const requestSecretBtn = document.getElementById('requestSecretBtn');
         const secretKeyInput = document.getElementById('secretKeyInput');
         const listSecretsBtn = document.getElementById('listSecretsBtn');
@@ -73,14 +70,11 @@
 
 
         let socket = null;
-        let clientId = null; // Server-assigned client ID (for admin tracking)
-        let temporaryId = null; // Server-assigned temporary ID (while pending)
-        // Auth token will be taken from authTokenInput.value when needed
+        let serverAssignedClientId = null; // Server-assigned client ID (for admin tracking)
+        let clientIsApproved = false; // Track if client is approved by server
 
         function updateClientStateDisplay() {
-            clientIdSpan.textContent = clientId || 'N/A';
-            tempIdSpan.textContent = temporaryId || 'N/A';
-            // authTokenInput value is the source of truth for sending
+            clientIdSpan.textContent = serverAssignedClientId || 'N/A';
         }
 
         function logMessage(message, type = 'info') {
@@ -106,58 +100,79 @@
                 connectBtn.disabled = true;
                 disconnectBtn.disabled = false;
                 registerBtn.disabled = false;
-                authenticateBtn.disabled = false;
-                // requestSecretBtn, listSecretsBtn, sendCustomBtn remain disabled until authenticated
+                // authenticateBtn.disabled = false; // Removed
                 sendCustomBtn.disabled = false; // Allow sending custom messages once connected
+                clientIsApproved = false; // Reset approval state on new connection
             };
 
             socket.onmessage = (event) => {
                 try {
                     const serverMessage = JSON.parse(event.data);
-                    logMessage(`Server: ${JSON.stringify(serverMessage, null, 2)}`, 'server');
+                    logMessage(`Server: ${JSON.stringify(serverMessage, null, 2)} (Code: ${serverMessage.code})`, 'server');
 
-                    // Handle different message types from server
+                    // Standard response codes
+                    const WsResponseCodes = { OK: 2000, REGISTRATION_SUBMITTED: 2001, BAD_REQUEST: 4000, UNAUTHORIZED: 4001, CLIENT_NOT_REGISTERED: 4005, CLIENT_REGISTRATION_EXPIRED: 4006 };
+
                     switch(serverMessage.type) {
                         case 'WELCOME':
-                            // Already logged
+                            clientStatusSpan.textContent = 'Connected. Please Register.';
                             break;
-                        case 'REGISTRATION_PENDING':
-                            clientId = serverMessage.payload.clientId;
-                            temporaryId = serverMessage.payload.temporaryId;
-                            clientStatusSpan.textContent = 'Registration Pending Approval';
-                            updateClientStateDisplay();
-                            logMessage(`IMPORTANT: Your Client ID for admin tracking is ${clientId}. Your temporary ID is ${temporaryId}. Store your permanent Auth Token from admin once approved.`, 'info');
+                        case 'REGISTRATION_ACK':
+                            if (serverMessage.code === WsResponseCodes.REGISTRATION_SUBMITTED) {
+                                serverAssignedClientId = serverMessage.payload.clientId;
+                                clientStatusSpan.textContent = 'Registration Submitted. Awaiting Admin Approval.';
+                                updateClientStateDisplay();
+                                logMessage(`Your Server-Assigned Client ID is ${serverAssignedClientId}. You will need admin approval to proceed.`, 'info');
+                            } else {
+                                clientStatusSpan.textContent = `Registration Failed (Code: ${serverMessage.code})`;
+                                logMessage(`Registration Error: ${serverMessage.payload.detail}`, 'error');
+                            }
                             break;
-                        case 'AUTHENTICATED':
-                            clientStatusSpan.textContent = `Authenticated as ${serverMessage.payload.name} (${serverMessage.payload.clientId})`;
-                            // authTokenInput.value might already have the token, or admin provides it.
-                            // No need to set authTokenInput.value from here unless server sends it back for some reason.
-                            requestSecretBtn.disabled = false;
-                            listSecretsBtn.disabled = false;
-                            logMessage(`Associated secrets: ${serverMessage.payload.associatedSecretKeys.join(', ')}`, 'info');
+                        // 'AUTHENTICATED' and 'AUTH_FAILED' types are removed
+                        case 'SECRET_DATA': // Renamed from SECRET_RESPONSE for clarity
+                            if (serverMessage.code === WsResponseCodes.OK) {
+                                logMessage(`Secret "${serverMessage.payload.secretKey}": ${JSON.stringify(serverMessage.payload.value)}`, 'info');
+                            } else {
+                                logMessage(`Error fetching secret (Code: ${serverMessage.code}): ${serverMessage.payload.detail}`, 'error');
+                            }
                             break;
-                        case 'AUTH_FAILED':
-                            clientStatusSpan.textContent = 'Authentication Failed';
-                            authTokenInput.value = ''; // Clear token if it failed
-                            requestSecretBtn.disabled = true;
-                            listSecretsBtn.disabled = true;
+                        case 'AUTHORIZED_SECRETS_LIST': // Or AVAILABLE_SECRETS_LIST depending on server
+                             if (serverMessage.code === WsResponseCodes.OK) {
+                                logMessage(`Authorized/Available secrets: ${serverMessage.payload.authorizedSecretKeys || serverMessage.payload.availableSecretKeys.join(', ')}`, 'info');
+                                // For this client, assume approval if it gets this list successfully for now
+                                clientIsApproved = true;
+                                requestSecretBtn.disabled = !clientIsApproved;
+                                listSecretsBtn.disabled = !clientIsApproved;
+                                clientStatusSpan.textContent = 'Approved. Actions enabled.';
+                            } else {
+                                logMessage(`Error listing secrets (Code: ${serverMessage.code}): ${serverMessage.payload.detail}`, 'error');
+                            }
                             break;
-                        case 'SECRET_RESPONSE':
-                            logMessage(`Secret "${serverMessage.payload.secretKey}": ${JSON.stringify(serverMessage.payload.value)}`, 'info');
-                            break;
-                        case 'AUTHORIZED_SECRETS_LIST':
-                            logMessage(`You are authorized to access: ${serverMessage.payload.authorizedSecretKeys.join(', ')}`, 'info');
-                            break;
-                        case 'UNAUTHORIZED_SECRET_ACCESS':
-                            logMessage(`Access denied for secret: ${serverMessage.payload.secretKey}`, 'error');
-                            break;
+                        // UNAUTHORIZED_SECRET_ACCESS type might be consolidated into general ERROR with code 4001
                         case 'ERROR':
-                            logMessage(`Server Error: ${serverMessage.payload.message}`, 'error');
+                            logMessage(`Server Error (Type: ${serverMessage.type}, Code: ${serverMessage.code}): ${serverMessage.payload.detail}`, 'error');
+                            if (serverMessage.code === WsResponseCodes.UNAUTHORIZED ||
+                                serverMessage.code === WsResponseCodes.CLIENT_NOT_REGISTERED ||
+                                serverMessage.code === WsResponseCodes.CLIENT_REGISTRATION_EXPIRED) {
+                                clientIsApproved = false;
+                                requestSecretBtn.disabled = true;
+                                listSecretsBtn.disabled = true;
+                                if (serverMessage.code === WsResponseCodes.CLIENT_REGISTRATION_EXPIRED) {
+                                    clientStatusSpan.textContent = "Registration Expired. Please re-register.";
+                                    serverAssignedClientId = null; // Clear client ID as it's no longer valid
+                                    updateClientStateDisplay();
+                                } else if (serverMessage.code === WsResponseCodes.CLIENT_NOT_REGISTERED) {
+                                    clientStatusSpan.textContent = "Not Registered. Please register.";
+                                } else {
+                                   clientStatusSpan.textContent = "Action Unauthorized or Approval Pending.";
+                                }
+                            }
                             break;
                         default:
-                            logMessage(`Unknown message type from server: ${serverMessage.type}`, 'error');
+                            logMessage(`Unknown message type from server: ${serverMessage.type} (Code: ${serverMessage.code})`, 'error');
                     }
                 } catch (e) {
+                    console.error("Error processing server message:", e);
                     logMessage(`Received non-JSON message from server: ${event.data}`, 'error');
                 }
             };
@@ -169,12 +184,12 @@
                 connectBtn.disabled = false;
                 disconnectBtn.disabled = true;
                 registerBtn.disabled = true;
-                authenticateBtn.disabled = true;
+                // authenticateBtn.disabled = true; // Removed
                 requestSecretBtn.disabled = true;
                 listSecretsBtn.disabled = true;
                 sendCustomBtn.disabled = true;
-                clientId = null;
-                temporaryId = null;
+                serverAssignedClientId = null;
+                clientIsApproved = false;
                 updateClientStateDisplay();
             };
 
@@ -192,10 +207,21 @@
             }
         });
 
+        // Function to generate a simple UUID for requestId
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
         function sendWebSocketMessage(messageObject) {
             if (socket && socket.readyState === WebSocket.OPEN) {
+                if (!messageObject.requestId) { // Add a requestId if not present
+                    messageObject.requestId = generateUUID();
+                }
                 const messageString = JSON.stringify(messageObject);
-                logMessage(`Client: ${messageString}`, 'client');
+                logMessage(`Client (Req ID: ${messageObject.requestId}): ${messageString}`, 'client');
                 socket.send(messageString);
             } else {
                 logMessage('Not connected. Cannot send message.', 'error');
@@ -208,29 +234,28 @@
                 logMessage('Please enter a client name for registration.', 'error');
                 return;
             }
+            clientIsApproved = false; // Reset approval state on new registration attempt
+            requestSecretBtn.disabled = true;
+            listSecretsBtn.disabled = true;
+            clientStatusSpan.textContent = "Registering...";
             sendWebSocketMessage({
                 type: "REGISTER_CLIENT",
                 payload: { clientName: clientName }
+                // Server will respond with REGISTRATION_ACK and its own client ID
             });
         });
 
-        authenticateBtn.addEventListener('click', () => {
-            const authToken = authTokenInput.value.trim();
-            if (!authToken) {
-                logMessage('Please enter an auth token to authenticate.', 'error');
-                return;
-            }
-            sendWebSocketMessage({
-                type: "AUTHENTICATE",
-                payload: { authToken: authToken }
-            });
-        });
+        // authenticateBtn event listener removed
 
         requestSecretBtn.addEventListener('click', () => {
             const secretKey = secretKeyInput.value.trim();
             if (!secretKey) {
                 logMessage('Please enter a secret key to request.', 'error');
                 return;
+            }
+            if (!clientIsApproved) {
+                 logMessage('Client not approved. Cannot request secret.', 'error');
+                 return;
             }
             sendWebSocketMessage({
                 type: "REQUEST_SECRET",
@@ -239,8 +264,13 @@
         });
 
         listSecretsBtn.addEventListener('click', () => {
+            if (!clientIsApproved) {
+                 logMessage('Client not approved. Cannot list secrets.', 'error');
+                 return;
+            }
             sendWebSocketMessage({
                 type: "LIST_AUTHORIZED_SECRETS"
+                // Server will respond with AUTHORIZED_SECRETS_LIST or AVAILABLE_SECRETS_LIST
             });
         });
 

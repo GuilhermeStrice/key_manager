@@ -20,6 +20,7 @@ export interface ClientInfo {
   associatedSecretKeys: string[]; // Keys of secrets this client can access
   // temporaryId removed
   requestedSecretKeys?: string[]; // Optional: Keys initially requested by the client
+  registrationTimestamp?: number; // Timestamp (Date.now()) when client entered pending state, for expiry
   dateCreated: string; // ISO 8601 date string
   dateUpdated: string; // ISO 8601 date string
 }
@@ -64,7 +65,47 @@ export async function initializeDataManager(password: string): Promise<void> {
   console.log('Master encryption key derived.');
 
   await loadData();
+
+  // Start periodic check for expiring pending clients
+  // The interval can be configured as needed. e.g., every 30 seconds.
+  const expiryCheckInterval = 30 * 1000; // 30 seconds
+  setInterval(checkAndExpirePendingClients, expiryCheckInterval);
+  console.log(`Started periodic check for pending client expiry every ${expiryCheckInterval / 1000} seconds.`);
 }
+
+const PENDING_CLIENT_EXPIRY_DURATION_MS = 60 * 1000; // 1 minute
+
+/**
+ * Checks for pending clients that have exceeded their registration expiry time
+ * and updates their status to 'rejected'.
+ */
+export async function checkAndExpirePendingClients(): Promise<void> {
+  let updated = false;
+  const now = Date.now();
+
+  for (const clientId in dataStore.clients) {
+    const client = dataStore.clients[clientId];
+    if (client.status === 'pending' && client.registrationTimestamp) {
+      if (now - client.registrationTimestamp > PENDING_CLIENT_EXPIRY_DURATION_MS) {
+        console.log(`Pending client "${client.name}" (ID: ${client.id}) has expired. Setting status to rejected.`);
+        client.status = 'rejected';
+        client.dateUpdated = new Date().toISOString();
+        // client.registrationTimestamp = undefined; // Optionally clear it, or keep for audit
+        updated = true;
+      }
+    }
+  }
+
+  if (updated) {
+    try {
+      await saveData();
+      console.log('Saved data after expiring pending clients.');
+    } catch (error) {
+      console.error('Failed to save data after expiring clients:', error);
+    }
+  }
+}
+
 
 /**
  * Loads data from the encrypted file and decrypts it.
@@ -217,6 +258,7 @@ export async function addPendingClient(
     associatedSecretKeys: [],
     // temporaryId: temporaryId, // Removed
     requestedSecretKeys: requestedSecretKeys || [],
+    registrationTimestamp: Date.now(), // Set registration timestamp
     dateCreated: now,
     dateUpdated: now,
   };

@@ -8,141 +8,174 @@ interface AuthenticatedWebSocket extends WebSocket {
   // clientInfo might not be relevant if not uniquely identifying for auth.
   // For now, we'll keep it to store basic info if registered.
   clientRegisteredName?: string; // Store the name given during REGISTER_CLIENT
-  clientServerId?: string; // Store the server-assigned ID
+  clientServerId?: string; // Store the server-assigned ID (from DataManager)
 }
 
-// Global toggle for WebSocket connections
-// TODO: Make this configurable (e.g., via admin UI or env variable)
-let acceptAllWebSocketConnections: boolean = true; // Default to true for now
+// Define response codes (as defined in the plan step)
+const WsResponseCodes = {
+  // Success
+  OK: 2000,
+  REGISTRATION_SUBMITTED: 2001,
+  // CLIENT_APPROVED: 2002, // Not used directly in responses yet
+  // NO_CONTENT: 2004, // Not used directly in responses yet
 
-export function startWebSocketServer(port: number, initialConnectionMode?: 'accept' | 'reject') {
-  if (initialConnectionMode === 'reject') {
-    acceptAllWebSocketConnections = false;
-  } else {
-    acceptAllWebSocketConnections = true; // Default or 'accept'
-  }
-  console.log(`WebSocket server starting. Global connection policy: ${acceptAllWebSocketConnections ? 'ACCEPT ALL' : 'REJECT ALL'}`);
+  // Client Errors
+  BAD_REQUEST: 4000,
+  UNAUTHORIZED: 4001, // For when client status is not 'approved' for an action
+  // FORBIDDEN: 4003, // Not used yet
+  NOT_FOUND: 4004,
+  CLIENT_NOT_REGISTERED: 4005, // Client hasn't sent REGISTER_CLIENT yet
+  CLIENT_REGISTRATION_EXPIRED: 4006, // Client's pending registration expired
+  // CONFLICT: 4009, // Not used yet
+
+  // Server Errors
+  INTERNAL_SERVER_ERROR: 5000,
+};
+
+// Helper function to send structured responses
+function sendWsResponse(ws: AuthenticatedWebSocket, type: string, code: number, payload: object, requestId?: string) {
+  const response = { type, code, payload, requestId };
+  ws.send(JSON.stringify(response));
+}
+
+
+export function startWebSocketServer(port: number) {
+  // Removed initialConnectionMode and acceptAllWebSocketConnections global toggle
+  console.log(`WebSocket server starting. All connections require registration and approval.`);
 
   const wss = new WebSocket.Server({ port });
 
   wss.on('connection', (ws: AuthenticatedWebSocket) => {
-    console.log('Client attempting to connect to WebSocket server...');
-
-    if (!acceptAllWebSocketConnections) {
-      console.log('Global policy is REJECT ALL. Terminating connection.');
-      ws.send(JSON.stringify({ type: "CONNECTION_REJECTED_POLICY", payload: { message: "Server is not accepting new WebSocket connections at this time." } }));
-      ws.terminate();
-      return;
-    }
-
-    console.log('Client connected (globally accepted).');
-    // ws.isAuthenticated = false; // No longer using token-based isAuthenticated flag per connection in the same way
+    console.log('Client connected to WebSocket server. Awaiting registration.');
 
     ws.on('message', async (messageData) => {
       let parsedMessage;
+      let clientRequestId: string | undefined;
+
       try {
-        // Ensure messageData is a string before parsing
         const messageString = messageData.toString();
         parsedMessage = JSON.parse(messageString);
+        clientRequestId = parsedMessage.requestId; // Capture client's requestId if provided
         console.log('Received from client:', parsedMessage);
       } catch (error) {
         console.error('Failed to parse message or message not JSON:', messageData.toString());
-        ws.send(JSON.stringify({ type: "ERROR", payload: { message: "Invalid message format. Expected JSON." } }));
+        sendWsResponse(ws, "ERROR", WsResponseCodes.BAD_REQUEST, { detail: "Invalid message format. Expected JSON." });
         return;
       }
 
       const { type, payload } = parsedMessage;
 
+      if (type !== 'REGISTER_CLIENT' && !ws.clientServerId) {
+        console.log("Client sent command before registration.");
+        sendWsResponse(ws, "ERROR", WsResponseCodes.CLIENT_NOT_REGISTERED, { detail: "Client must register first using REGISTER_CLIENT." }, clientRequestId);
+        return;
+      }
+
+
       switch (type) {
         case 'REGISTER_CLIENT':
           try {
+            if (ws.clientServerId) {
+                sendWsResponse(ws, "ERROR", WsResponseCodes.BAD_REQUEST, { detail: "Client already registered for this connection." }, clientRequestId);
+                return;
+            }
             if (!payload || !payload.clientName) {
-              throw new Error("clientName is required for registration.");
+              sendWsResponse(ws, "ERROR", WsResponseCodes.BAD_REQUEST, { detail: "clientName is required for registration." }, clientRequestId);
+              return;
             }
             // Add to DataManager as pending
             const newClient = await DataManager.addPendingClient(payload.clientName, payload.requestedSecretKeys);
-            ws.send(JSON.stringify({
-              type: "REGISTRATION_PENDING",
-              payload: {
-                clientId: newClient.id, // This is the server-side ID for admin tracking
-                // temporaryId: newClient.temporaryId, // temporaryId removed from ClientInfo
-                message: `Registration for "${newClient.name}" is recorded. Your client ID is ${newClient.id}. Server is in global accept mode.`
-              }
-            }));
-            // Store client name and server ID on the WebSocket connection object
+
             ws.clientRegisteredName = newClient.name;
             ws.clientServerId = newClient.id;
+
+            sendWsResponse(ws, "REGISTRATION_ACK", WsResponseCodes.REGISTRATION_SUBMITTED, {
+                clientId: newClient.id,
+                detail: `Registration for "${newClient.name}" submitted. Awaiting admin approval. Your Client ID is ${newClient.id}.`
+            }, clientRequestId);
+            console.log(`Client "${newClient.name}" (ID: ${newClient.id}) registration submitted.`);
+
           } catch (error: any) {
-            ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Registration failed: ${error.message}` } }));
+            console.error("Registration error:", error);
+            sendWsResponse(ws, "ERROR", WsResponseCodes.INTERNAL_SERVER_ERROR, { detail: `Registration failed: ${error.message}` }, clientRequestId);
           }
           break;
 
-        // case 'AUTHENTICATE': // AUTHENTICATE message type is removed
-        //   // This entire case is no longer needed as authentication is global
-        //   break;
-
+        // Placeholder for other message types (e.g., REQUEST_SECRET) - will be handled in next step
+        // For now, if not authenticated, reject other types.
         default:
-          // If globally accepted, all connected clients are considered "authenticated" to interact.
-          // The old check `if (!ws.isAuthenticated || !ws.clientInfo)` is no longer directly applicable in the same way.
-          // We can check if the client has at least registered a name.
-          if (!ws.clientRegisteredName) {
-             ws.send(JSON.stringify({ type: "ERROR", payload: { message: "Client has not registered. Please send a REGISTER_CLIENT message first." } }));
-             return;
+          // At this point, ws.clientServerId should be set if type is not REGISTER_CLIENT.
+          // Now, we check the client's status from DataManager.
+          const clientInfo = ws.clientServerId ? DataManager.getClient(ws.clientServerId) : undefined;
+
+          if (!clientInfo) {
+            console.log(`Client data not found for ID: ${ws.clientServerId}. Terminating connection.`);
+            sendWsResponse(ws, "ERROR", WsResponseCodes.UNAUTHORIZED, { detail: "Client not recognized or registration incomplete. Please re-register." }, clientRequestId);
+            ws.terminate(); // Or close, terminate is more abrupt
+            return;
           }
 
-          console.log(`Processing message type "${type}" for registered client: ${ws.clientRegisteredName} (${ws.clientServerId})`);
+          if (clientInfo.status === 'pending') {
+            // Check if registration might have expired
+            if (clientInfo.registrationTimestamp && (Date.now() - clientInfo.registrationTimestamp > (60 * 1000 + 5000))) { // Add 5s buffer to expiry check
+                 sendWsResponse(ws, "ERROR", WsResponseCodes.CLIENT_REGISTRATION_EXPIRED, { detail: "Your registration request has expired. Please register again." }, clientRequestId);
+            } else {
+                 sendWsResponse(ws, "ERROR", WsResponseCodes.UNAUTHORIZED, { detail: "Client registration is pending admin approval." }, clientRequestId);
+            }
+            return;
+          }
 
-          // Handle messages for "authenticated" (i.e., globally accepted and registered) clients
+          if (clientInfo.status === 'rejected') {
+            sendWsResponse(ws, "ERROR", WsResponseCodes.UNAUTHORIZED, { detail: "Client registration was rejected by admin." }, clientRequestId);
+            return;
+          }
+
+          if (clientInfo.status !== 'approved') {
+            sendWsResponse(ws, "ERROR", WsResponseCodes.UNAUTHORIZED, { detail: `Client not approved. Current status: ${clientInfo.status}.` }, clientRequestId);
+            return;
+          }
+
+          // If we reach here, client is approved.
+          console.log(`Processing message type "${type}" for approved client: ${clientInfo.name} (${clientInfo.id})`);
+
+          // Handle messages for authenticated clients
           switch(type) {
             case 'REQUEST_SECRET':
               try {
                 if (!payload || !payload.secretKey) {
-                  throw new Error("secretKey is required for REQUEST_SECRET.");
+                  sendWsResponse(ws, "ERROR", WsResponseCodes.BAD_REQUEST, { detail: "secretKey is required for REQUEST_SECRET." }, clientRequestId);
+                  return;
                 }
                 const secretKey = payload.secretKey;
-                // TODO: Re-evaluate secret access logic.
-                // For now, if globally accepted, assume access to all requested secrets.
-                // This part needs to align with the new auth model:
-                // Does "global accept" mean access to ALL secrets for any connected client?
-                // Or should clients still declare what they need and admin associates them?
-                // For simplicity of this step, let's assume any registered client in global accept mode can request any secret.
-                // This is a placeholder and likely needs refinement for security.
-                const clientData = DataManager.getClient(ws.clientServerId!); // Get client data to check their *requested* keys
-                                                                              // or associated keys if admin still manages that.
-                                                                              // For now, let's simplify and allow any secret.
-
-                const secretValue = DataManager.getSecretItem(secretKey);
-                if (secretValue !== undefined) {
-                  ws.send(JSON.stringify({
-                    type: "SECRET_RESPONSE",
-                    payload: { secretKey, value: secretValue }
-                  }));
+                if (clientInfo.associatedSecretKeys.includes(secretKey)) {
+                  const secretValue = DataManager.getSecretItem(secretKey);
+                  if (secretValue !== undefined) {
+                    sendWsResponse(ws, "SECRET_DATA", WsResponseCodes.OK, { secretKey, value: secretValue }, clientRequestId);
+                  } else {
+                    console.error(`Client ${clientInfo.name} authorized for non-existent secret ${secretKey}`);
+                    sendWsResponse(ws, "ERROR", WsResponseCodes.NOT_FOUND, { detail: `Secret key "${secretKey}" not found on server, though authorized.` }, clientRequestId);
+                  }
                 } else {
-                  ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Secret key "${secretKey}" not found on server.` } }));
+                  sendWsResponse(ws, "ERROR", WsResponseCodes.UNAUTHORIZED, { detail: "You are not authorized to access this secret." }, clientRequestId);
                 }
               } catch (error: any) {
-                ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Error requesting secret: ${error.message}` } }));
+                console.error("Error requesting secret:", error);
+                sendWsResponse(ws, "ERROR", WsResponseCodes.INTERNAL_SERVER_ERROR, { detail: `Error requesting secret: ${error.message}` }, clientRequestId);
               }
               break;
 
             case 'LIST_AUTHORIZED_SECRETS':
               try {
-                // TODO: Re-evaluate this. If globally accepted, what does "authorized" mean?
-                // For now, let's list all available secret keys on the server.
-                // This is a placeholder and needs security review.
-                const allSecretKeys = DataManager.getAllSecretKeys();
-                ws.send(JSON.stringify({
-                  type: "AVAILABLE_SECRETS_LIST", // Changed from AUTHORIZED_SECRETS_LIST
-                  payload: { availableSecretKeys: allSecretKeys }
-                }));
+                sendWsResponse(ws, "AUTHORIZED_SECRETS_LIST", WsResponseCodes.OK, { authorizedSecretKeys: clientInfo.associatedSecretKeys }, clientRequestId);
               } catch (error: any) {
-                 ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Error listing available secrets: ${error.message}` } }));
+                console.error("Error listing authorized secrets:", error);
+                sendWsResponse(ws, "ERROR", WsResponseCodes.INTERNAL_SERVER_ERROR, { detail: `Error listing authorized secrets: ${error.message}` }, clientRequestId);
               }
               break;
 
             default:
-              console.log(`Client ${ws.clientRegisteredName} (${ws.clientServerId}) sent unhandled message type: ${type}`);
-              ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Unknown message type: ${type}` } }));
+              console.log(`Approved client ${clientInfo.name} sent unhandled message type: ${type}`);
+              sendWsResponse(ws, "ERROR", WsResponseCodes.BAD_REQUEST, { detail: `Unknown message type: ${type}` }, clientRequestId);
               break;
           }
           break;
@@ -157,8 +190,7 @@ export function startWebSocketServer(port: number, initialConnectionMode?: 'acce
       console.error(`WebSocket error for client ${ws.clientRegisteredName || 'Unknown'}:`, error);
     });
 
-    // Updated welcome message
-    ws.send(JSON.stringify({ type: "WELCOME", payload: { message: "Welcome to the WebSocket server! Connections are globally managed. Please register your client name." } }));
+    sendWsResponse(ws, "WELCOME", WsResponseCodes.OK, { detail: "Welcome! Please register your client using REGISTER_CLIENT message." });
   });
 
   console.log(`WebSocket server started on ws://localhost:${port}`);
