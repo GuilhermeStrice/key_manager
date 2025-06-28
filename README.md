@@ -59,12 +59,31 @@ You can configure the server using a `.env` file in the project root or by setti
 *   `MASTER_PASSWORD`: If set, this password will be used directly, bypassing the console prompt. Useful for automated deployments.
 *   `HTTP_PORT`: Port for the HTTP admin server (default: `3000`).
 *   `WS_PORT`: Port for the WebSocket server (default: `3001`).
+*   `HTTP_ADMIN_RATE_LIMIT_WINDOW_MS`: Time window in milliseconds for general admin API rate limiting (default: `900000`, 15 minutes).
+*   `HTTP_ADMIN_RATE_LIMIT_MAX`: Max requests per IP for general admin API in the window (default: `100`).
+*   `HTTP_LOGIN_RATE_LIMIT_WINDOW_MS`: Time window in milliseconds for admin login attempt rate limiting (default: `3600000`, 1 hour).
+*   `HTTP_LOGIN_RATE_LIMIT_MAX`: Max login attempts per IP in the window (default: `5`).
+*   `WS_RATE_LIMIT_WINDOW_MS`: Time window in milliseconds for general WebSocket message rate limiting (default: `60000`, 1 minute).
+*   `WS_MAX_MESSAGES_PER_WINDOW`: Max WebSocket messages per client in the window (default: `100`).
+*   `WS_REGISTER_RATE_LIMIT_WINDOW_MS`: Time window in milliseconds for WebSocket registration attempts per IP (default: `3600000`, 1 hour).
+*   `WS_MAX_REGISTRATIONS_PER_WINDOW`: Max WebSocket registration attempts per IP in the window (default: `10`).
+
 
 Example `.env` file:
 ```
 HTTP_PORT=3005
 WS_PORT=3006
 # MASTER_PASSWORD=yourSuperStrongPasswordHere (Use with caution, especially in shared environments)
+
+# Optional Rate Limiting Configuration Examples
+# HTTP_ADMIN_RATE_LIMIT_WINDOW_MS=900000
+# HTTP_ADMIN_RATE_LIMIT_MAX=100
+# HTTP_LOGIN_RATE_LIMIT_WINDOW_MS=3600000
+# HTTP_LOGIN_RATE_LIMIT_MAX=5
+# WS_RATE_LIMIT_WINDOW_MS=60000
+# WS_MAX_MESSAGES_PER_WINDOW=100
+# WS_REGISTER_RATE_LIMIT_WINDOW_MS=3600000
+# WS_MAX_REGISTRATIONS_PER_WINDOW=10
 ```
 
 ## Admin UI
@@ -238,7 +257,7 @@ Manual testing of the Admin UI and WebSocket API is recommended using the `clien
 *   **HTTPS/WSS**: For production deployments, always run the HTTP and WebSocket servers over HTTPS and WSS respectively to protect data in transit, including the master password during admin login and auth tokens. This setup does not include HTTPS/WSS by default.
 *   **Data Directory**: The `data/` directory (containing `secrets.json.enc` and `masterkey.salt`) should have restricted file permissions and be regularly backed up. It is ignored by git by default.
 *   **Input Validation**: While basic validation is in place, thorough validation of all inputs (admin UI, WebSocket messages) is crucial for robust security.
-*   **Rate Limiting/Brute-Force Protection**: Not implemented. Consider adding for production environments.
+*   `Rate Limiting/Brute-Force Protection`: Implemented for HTTP admin endpoints and WebSocket messages. These are configurable via environment variables (see Environment Variables section).
 
 ## Project Structure
 

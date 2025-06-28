@@ -1,5 +1,6 @@
 // HTTP server and admin UI logic
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import helmet from 'helmet'; // Security headers
 import jwt from 'jsonwebtoken'; // Added for JWT
@@ -30,6 +31,37 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
   // Use Helmet for basic security headers
   app.use(helmet());
+
+  // Rate Limiting
+  // General limiter for most admin routes
+  const adminApiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+    message: 'Too many requests from this IP, please try again after 15 minutes.',
+  });
+
+  // Stricter limiter for login attempts
+  const loginLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5, // Limit each IP to 5 login attempts per windowMs
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: 'Too many login attempts from this IP, please try again after an hour.',
+    skipSuccessfulRequests: true, // Do not count successful logins towards the limit
+  });
+
+  // Apply general limiter to all /admin routes, except login page GET
+  // Specific routes like login POST will have their own stricter limiter.
+  app.use('/admin', (req, res, next) => {
+    // Skip general rate limiter for GET /admin/login to allow page rendering
+    if (req.path === '/login' && req.method === 'GET') {
+        return next();
+    }
+    adminApiLimiter(req, res, next);
+  });
+
 
   // Setup EJS as the templating engine
   app.set('view engine', 'ejs');
@@ -141,7 +173,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     `);
   });
 
-  app.post('/admin/login', express.urlencoded({ extended: false }), (req, res) => {
+  app.post('/admin/login', loginLimiter, express.urlencoded({ extended: false }), (req, res) => {
      if (req.body.password && req.body.password === serverAdminPasswordSingleton) {
         // Generate JWT
         const token = jwt.sign({ admin: true, user: 'admin' }, JWT_SECRET, { expiresIn: '1h' });

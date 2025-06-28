@@ -3,16 +3,18 @@ import WebSocket from 'ws';
 import * as DataManager from '../lib/dataManager';
 import { autoApproveWebSocketRegistrations } from '../http/httpServer'; // Import the flag
 
-// Extend WebSocket instance type to hold authentication state
+// Extend WebSocket instance type to hold authentication state and rate limit data
 interface AuthenticatedWebSocket extends WebSocket {
-  // isAuthenticated is now effectively controlled by acceptAllWebSocketConnections
-  // clientInfo might not be relevant if not uniquely identifying for auth.
-  // For now, we'll keep it to store basic info if registered.
   clientRegisteredName?: string; // Store the name given during REGISTER_CLIENT
   clientServerId?: string; // Store the server-assigned ID (from DataManager)
+  // Rate limiting properties
+  lastMessageTime?: number;
+  messageCount?: number;
+  // For IP based limiting before registration
+  ip?: string;
 }
 
-// Define response codes (as defined in the plan step)
+// Define response codes
 const WsResponseCodes = {
   // Success
   OK: 2000,
@@ -27,11 +29,22 @@ const WsResponseCodes = {
   NOT_FOUND: 4004,
   CLIENT_NOT_REGISTERED: 4005, // Client hasn't sent REGISTER_CLIENT yet
   CLIENT_REGISTRATION_EXPIRED: 4006, // Client's pending registration expired
+  RATE_LIMIT_EXCEEDED: 4029, // Standard "Too Many Requests"
   // CONFLICT: 4009, // Not used yet
 
   // Server Errors
   INTERNAL_SERVER_ERROR: 5000,
 };
+
+// Rate Limiting Configuration
+const WS_RATE_LIMIT_WINDOW_MS = parseInt(process.env.WS_RATE_LIMIT_WINDOW_MS || (60 * 1000).toString(), 10); // 1 minute
+const WS_MAX_MESSAGES_PER_WINDOW = parseInt(process.env.WS_MAX_MESSAGES_PER_WINDOW || '100', 10); // 100 messages per minute
+const WS_REGISTER_RATE_LIMIT_WINDOW_MS = parseInt(process.env.WS_REGISTER_RATE_LIMIT_WINDOW_MS || (60 * 60 * 1000).toString(), 10); // 1 hour
+const WS_MAX_REGISTRATIONS_PER_WINDOW = parseInt(process.env.WS_MAX_REGISTRATIONS_PER_WINDOW || '10', 10); // 10 registration attempts per hour (per IP)
+
+// Store for IP-based rate limiting for registration attempts
+const registrationRateLimiter = new Map<string, { count: number, windowStart: number }>();
+
 
 // Helper function to send structured responses
 function sendWsResponse(ws: AuthenticatedWebSocket, type: string, code: number, payload: object, requestId?: string) {
@@ -73,15 +86,46 @@ export function notifyClientStatusUpdate(clientId: string, newStatus: DataManage
 export function startWebSocketServer(port: number) {
   // Removed initialConnectionMode and acceptAllWebSocketConnections global toggle
   console.log(`WebSocket server starting. All connections require registration and approval.`);
+  console.log(`WS Rate Limiting: General: ${WS_MAX_MESSAGES_PER_WINDOW} msgs / ${WS_RATE_LIMIT_WINDOW_MS / 1000}s. Register: ${WS_MAX_REGISTRATIONS_PER_WINDOW} attempts / ${WS_REGISTER_RATE_LIMIT_WINDOW_MS / 1000 / 60}m.`);
+
 
   const wss = new WebSocket.Server({ port });
 
-  wss.on('connection', (ws: AuthenticatedWebSocket) => {
-    console.log('Client connected to WebSocket server. Awaiting registration.');
+  wss.on('connection', (ws: AuthenticatedWebSocket, req) => {
+    // Get client IP - req.socket.remoteAddress might be undefined if connection is already closed or proxied without proper headers.
+    // For proxies, ensure 'x-forwarded-for' is trusted and used if available.
+    // Simplified: use remoteAddress directly.
+    ws.ip = req.socket.remoteAddress || 'unknown';
+    console.log(`Client connected from IP: ${ws.ip}. Awaiting registration.`);
+
+    // Initialize rate limiting properties for general messages
+    ws.messageCount = 0;
+    ws.lastMessageTime = Date.now();
+
 
     ws.on('message', async (messageData) => {
       let parsedMessage;
       let clientRequestId: string | undefined;
+
+      // --- General Per-Client Rate Limiting (for registered clients) ---
+      if (ws.clientServerId) { // Only apply this to registered clients
+        const now = Date.now();
+        if (now - (ws.lastMessageTime || now) > WS_RATE_LIMIT_WINDOW_MS) {
+          ws.messageCount = 1;
+          ws.lastMessageTime = now;
+        } else {
+          ws.messageCount = (ws.messageCount || 0) + 1;
+          if (ws.messageCount > WS_MAX_MESSAGES_PER_WINDOW) {
+            console.warn(`Client ${ws.clientServerId} (${ws.clientRegisteredName}) exceeded general message rate limit from IP ${ws.ip}.`);
+            sendWsResponse(ws, "ERROR", WsResponseCodes.RATE_LIMIT_EXCEEDED, { detail: `Too many messages. Please slow down. Limit: ${WS_MAX_MESSAGES_PER_WINDOW} per ${WS_RATE_LIMIT_WINDOW_MS / 1000}s.` });
+            // Optionally, could implement a short cooldown or temporary ignore here.
+            // For now, just sending error and processing no further for this message.
+            return;
+          }
+        }
+      }
+      // --- End General Per-Client Rate Limiting ---
+
 
       try {
         const messageString = messageData.toString();
@@ -105,6 +149,26 @@ export function startWebSocketServer(port: number) {
 
       switch (type) {
         case 'REGISTER_CLIENT':
+          // --- IP-based Rate Limiting for Registration ---
+          const ip = ws.ip!; // Should be set on connection
+          const now = Date.now();
+          let ipInfo = registrationRateLimiter.get(ip);
+
+          if (ipInfo && (now - ipInfo.windowStart < WS_REGISTER_RATE_LIMIT_WINDOW_MS)) {
+            ipInfo.count++;
+          } else { // New window or first attempt for this IP
+            ipInfo = { count: 1, windowStart: now };
+            registrationRateLimiter.set(ip, ipInfo);
+          }
+          // Clean up old entries from the registrationRateLimiter map periodically (not shown here for brevity, but important for long-running servers)
+
+          if (ipInfo.count > WS_MAX_REGISTRATIONS_PER_WINDOW) {
+            console.warn(`IP ${ip} exceeded registration rate limit.`);
+            sendWsResponse(ws, "ERROR", WsResponseCodes.RATE_LIMIT_EXCEEDED, { detail: `Too many registration attempts from this IP. Please try again later. Limit: ${WS_MAX_REGISTRATIONS_PER_WINDOW} per ${WS_REGISTER_RATE_LIMIT_WINDOW_MS / 1000 / 60} minutes.` }, clientRequestId);
+            return; // Stop processing this registration request
+          }
+          // --- End IP-based Rate Limiting for Registration ---
+
           try {
             if (ws.clientServerId) {
                 sendWsResponse(ws, "ERROR", WsResponseCodes.BAD_REQUEST, { detail: "Client already registered for this connection." }, clientRequestId);
