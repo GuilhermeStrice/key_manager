@@ -19,12 +19,10 @@ let serverAdminPasswordSingleton: string | null = null;
 // Global flag for WebSocket auto-approval (debug purposes)
 export let autoApproveWebSocketRegistrations: boolean = false;
 
-// IMPORTANT: Set a strong, unique JWT_SECRET in your .env file for production!
-const JWT_SECRET = process.env.JWT_SECRET || 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD';
-if (JWT_SECRET === 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD') {
-    console.warn('WARNING: Using default JWT secret. This is NOT secure for production. Set JWT_SECRET in your environment.');
-}
+// JWT Secret will be determined after loading runtime config
+let JWT_SECRET: string = '';
 const ADMIN_COOKIE_NAME = 'admin_token';
+const PLACEHOLDER_JWT_SECRET = 'PLEASE_SET_A_STRONG_JWT_SECRET';
 
 
 export async function startHttpServer(port: number, serverAdminPassword?: string) {
@@ -32,6 +30,29 @@ export async function startHttpServer(port: number, serverAdminPassword?: string
   const runtimeConfig = await ConfigManager.loadConfiguration();
   autoApproveWebSocketRegistrations = runtimeConfig.autoApproveWebSocketRegistrations;
   console.log(`Initial autoApproveWebSocketRegistrations state: ${autoApproveWebSocketRegistrations}`);
+
+  // Determine JWT_SECRET based on priority: process.env > runtimeConfig > placeholder (with warning)
+  if (process.env.JWT_SECRET) {
+    JWT_SECRET = process.env.JWT_SECRET;
+    console.log('Using JWT_SECRET from environment variable.');
+  } else if (runtimeConfig.jwtSecret && runtimeConfig.jwtSecret !== PLACEHOLDER_JWT_SECRET) {
+    JWT_SECRET = runtimeConfig.jwtSecret;
+    console.log('Using JWT_SECRET from runtime-config.json.');
+  } else {
+    JWT_SECRET = runtimeConfig.jwtSecret; // This would be the placeholder
+    console.warn('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+    console.warn('WARNING: Using a placeholder JWT secret from runtime-config.json.');
+    console.warn('This is INSECURE and should NOT be used in production.');
+    console.warn('Please set JWT_SECRET in your environment variables or update runtime-config.json');
+    console.warn('with a strong, unique secret.');
+    console.warn('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+    if (JWT_SECRET !== PLACEHOLDER_JWT_SECRET) { // Should not happen if logic is correct
+        console.error("Error: JWT_SECRET logic inconsistency. Please check configManager.ts defaults and httpServer.ts loading.");
+        // Fallback to a known insecure default to prevent undefined behavior, though this state indicates a bug.
+        JWT_SECRET = 'UNEXPECTED_DEFAULT_FALLBACK_SECRET_BUG';
+    }
+  }
+
 
   const app = express();
 
