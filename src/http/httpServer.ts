@@ -401,6 +401,12 @@ export async function startHttpServer(port: number, serverAdminPassword?: string
       // currentPassword from query is removed.
       const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
 
+      console.log('[DEBUG] Rendering /admin/clients:');
+      console.log('[DEBUG] Pending Clients:', JSON.stringify(pendingClients, null, 2));
+      console.log('[DEBUG] Approved Clients:', JSON.stringify(approvedClients, null, 2));
+      console.log('[DEBUG] Message:', message);
+      console.log('[DEBUG] CSRF Token will be generated.');
+
       res.render('clients', {
         pendingClients,
         approvedClients,
