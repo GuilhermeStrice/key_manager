@@ -259,29 +259,34 @@ export function startWebSocketServer(port: number) {
                   sendWsResponse(ws, "ERROR", WsResponseCodes.BAD_REQUEST, { detail: "secretKey is required for REQUEST_SECRET." }, clientRequestId);
                   return;
                 }
-                const secretKey = payload.secretKey;
-                if (clientInfo.associatedSecretKeys.includes(secretKey)) {
-                  const secretValue = DataManager.getSecretItem(secretKey);
-                  if (secretValue !== undefined) {
-                    sendWsResponse(ws, "SECRET_DATA", WsResponseCodes.OK, { secretKey, value: secretValue }, clientRequestId);
+                const secretKeyToRequest = payload.secretKey;
+                // Use new DataManager function to get all keys client is authorized for
+                const authorizedKeys = DataManager.getSecretsForClient(clientInfo.id);
+
+                if (authorizedKeys.includes(secretKeyToRequest)) {
+                  const secretData = DataManager.getSecretWithValue(secretKeyToRequest); // Fetch {value, groupId}
+                  if (secretData && secretData.value !== undefined) {
+                    sendWsResponse(ws, "SECRET_DATA", WsResponseCodes.OK, { secretKey: secretKeyToRequest, value: secretData.value }, clientRequestId);
                   } else {
-                    console.error(`Client ${clientInfo.name} authorized for non-existent secret ${secretKey}`);
-                    sendWsResponse(ws, "ERROR", WsResponseCodes.NOT_FOUND, { detail: `Secret key "${secretKey}" not found on server, though authorized.` }, clientRequestId);
+                    // This case implies an inconsistency: client is authorized for a key that doesn't exist in secrets store.
+                    console.error(`Client ${clientInfo.name} (ID: ${clientInfo.id}) authorized for non-existent secret key "${secretKeyToRequest}". Data inconsistency.`);
+                    sendWsResponse(ws, "ERROR", WsResponseCodes.NOT_FOUND, { detail: `Secret key "${secretKeyToRequest}" not found on server, though client is authorized. Please contact admin.` }, clientRequestId);
                   }
                 } else {
-                  sendWsResponse(ws, "ERROR", WsResponseCodes.UNAUTHORIZED, { detail: "You are not authorized to access this secret." }, clientRequestId);
+                  sendWsResponse(ws, "ERROR", WsResponseCodes.UNAUTHORIZED, { detail: `You are not authorized to access the secret key "${secretKeyToRequest}".` }, clientRequestId);
                 }
               } catch (error: any) {
-                console.error("Error requesting secret:", error);
+                console.error("Error processing REQUEST_SECRET:", error);
                 sendWsResponse(ws, "ERROR", WsResponseCodes.INTERNAL_SERVER_ERROR, { detail: `Error requesting secret: ${error.message}` }, clientRequestId);
               }
               break;
 
             case 'LIST_AUTHORIZED_SECRETS':
               try {
-                sendWsResponse(ws, "AUTHORIZED_SECRETS_LIST", WsResponseCodes.OK, { authorizedSecretKeys: clientInfo.associatedSecretKeys }, clientRequestId);
+                const authorizedKeys = DataManager.getSecretsForClient(clientInfo.id);
+                sendWsResponse(ws, "AUTHORIZED_SECRETS_LIST", WsResponseCodes.OK, { authorizedSecretKeys: authorizedKeys }, clientRequestId);
               } catch (error: any) {
-                console.error("Error listing authorized secrets:", error);
+                console.error("Error processing LIST_AUTHORIZED_SECRETS:", error);
                 sendWsResponse(ws, "ERROR", WsResponseCodes.INTERNAL_SERVER_ERROR, { detail: `Error listing authorized secrets: ${error.message}` }, clientRequestId);
               }
               break;

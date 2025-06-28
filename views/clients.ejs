@@ -57,28 +57,28 @@
         </div>
         <% } %>
 
-        <% if (managingClientSecrets) { %>
-            <h2>Manage Secrets for Client: <span class="mono"><%= managingClientSecrets.client.name %> (<%= managingClientSecrets.client.id %>)</span></h2>
-            <form action="/admin/clients/<%= managingClientSecrets.client.id %>/secrets/update" method="POST">
+        <% if (managingClientGroups) { %>
+            <h2>Manage Associated Groups for Client: <span class="mono"><%= managingClientGroups.client.name %> (<%= managingClientGroups.client.id %>)</span></h2>
+            <form action="/admin/clients/<%= managingClientGroups.client.id %>/groups/update" method="POST">
                 <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <div class="form-group">
-                    <label>Available Secrets (select to associate):</label>
-                    <% if (managingClientSecrets.allSecrets.length > 0) { %>
-                        <% managingClientSecrets.allSecrets.forEach(secretKey => { %>
+                    <label>Available Groups (select to associate):</label>
+                    <% if (managingClientGroups.allGroups && managingClientGroups.allGroups.length > 0) { %>
+                        <% managingClientGroups.allGroups.forEach(group => { %>
                             <div>
                                 <input type="checkbox"
-                                       id="secret_<%= secretKey %>"
-                                       name="associatedSecretKeys"
-                                       value="<%= secretKey %>"
-                                       <%= managingClientSecrets.client.associatedSecretKeys.includes(secretKey) ? 'checked' : '' %>>
-                                <label for="secret_<%= secretKey %>"><%= secretKey %></label>
+                                       id="group_<%= group.id %>"
+                                       name="associatedGroupIds"
+                                       value="<%= group.id %>"
+                                       <%= managingClientGroups.client.associatedGroupIds.includes(group.id) ? 'checked' : '' %>>
+                                <label for="group_<%= group.id %>"><%= group.name %> (ID: <%= group.id %>)</label>
                             </div>
                         <% }); %>
                     <% } else { %>
-                        <p>No secrets available to associate. Add secrets in the 'Manage Secrets' section first.</p>
+                        <p>No groups available to associate. Create groups in the main admin panel first.</p>
                     <% } %>
                 </div>
-                <button type="submit" class="btn">Update Associated Secrets</button>
+                <button type="submit" class="btn">Update Associated Groups</button>
                 <a href="/admin/clients" class="btn btn-secondary">Back to Client List</a>
             </form>
         <% } else { %>
@@ -89,7 +89,7 @@
                         <tr>
                             <th>Name</th>
                             <th>Client ID / Temp ID</th>
-                            <th>Requested Secrets</th>
+                            <th>Requested Secrets (Legacy)</th>
                             <th>Date Registered</th>
                             <th>Actions</th>
                         </tr>
@@ -126,7 +126,7 @@
                         <tr>
                             <th>Name</th>
                             <th>Client ID</th>
-                            <th>Associated Secrets</th>
+                            <th>Associated Groups</th>
                             <th>Date Approved/Updated</th>
                             <th>Actions</th>
                         </tr>
@@ -136,10 +136,10 @@
                             <tr>
                                 <td><%= client.name %></td>
                                 <td class="mono"><%= client.id %></td>
-                                <td><%= client.associatedSecretKeys.join(', ') || 'None' %></td>
+                                <td><%= client.associatedGroupNames %></td> <%# Now using associatedGroupNames from server %>
                                 <td><%= new Date(client.dateUpdated).toLocaleString() %></td>
                                 <td class="actions">
-                                    <a href="/admin/clients/<%= client.id %>/secrets">Manage Secrets</a>
+                                    <a href="/admin/clients/<%= client.id %>/groups">Manage Groups</a>
                                     <form action="/admin/clients/revoke/<%= client.id %>" method="POST" style="display:inline;">
                                         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                                         <button type="submit" class="delete">Revoke</button>

@@ -41,37 +41,123 @@
 
         <h2>Manage Secrets</h2>
 
-        <% if (editingItemKey !== null && itemToEdit !== undefined) { %>
-            <h3>Edit Secret: <%= editingItemKey %></h3>
+        <% if (editingItemKey !== null && itemToEdit !== undefined && typeof itemToEdit.value !== 'undefined') { %>
+            <h3>Edit Secret Value: <em><%= editingItemKey %></em></h3>
             <form action="/admin/update-secret" method="POST">
                 <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <input type="hidden" name="originalKey" value="<%= editingItemKey %>">
+                <input type="hidden" name="secretKey" value="<%= editingItemKey %>"> <%# Key is not changeable here %>
+
                 <div class="form-group">
-                    <label for="editSecretKey">Key (leave unchanged if not modifying key name):</label>
-                    <input type="text" id="editSecretKey" name="secretKey" value="<%= editingItemKey %>" required>
+                    <label>Secret Key:</label>
+                    <p><strong><%= editingItemKey %></strong></p>
+                </div>
+                <div class="form-group">
+                    <label>Belongs to Group:</label>
+                    <p>
+                        <strong><%= itemToEdit.groupName %></strong> (ID: <%= itemToEdit.groupId %>)
+                        <% if (!itemToEdit.groupId) { %> <span style="color:red;">(Warning: No group assigned or group missing!)</span> <% } %>
+                    </p>
                 </div>
                 <div class="form-group">
                     <label for="editSecretValue">Value (JSON format recommended for complex data):</label>
-                    <textarea id="editSecretValue" name="secretValue" required><%= typeof itemToEdit === 'string' ? itemToEdit : JSON.stringify(itemToEdit, null, 2) %></textarea>
+                    <textarea id="editSecretValue" name="secretValue" required><%= typeof itemToEdit.value === 'string' ? itemToEdit.value : JSON.stringify(itemToEdit.value, null, 2) %></textarea>
                 </div>
-                <button type="submit" class="btn">Update Secret</button>
-                <a href="/admin" class="btn">Cancel Edit</a>
+                <button type="submit" class="btn">Update Secret Value</button>
+                <a href="/admin" class="btn btn-secondary">Cancel Edit</a>
             </form>
         <% } else { %>
             <h3>Add New Secret</h3>
             <form action="/admin/add-secret" method="POST">
                 <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <div class="form-group">
+                    <label for="groupId">Select Group:</label>
+                    <select id="groupId" name="groupId" required class="form-control"> <%# Using form-control for consistent styling if bootstrap-like styles are used %>
+                        <% if (secretGroups && secretGroups.length > 0) { %>
+                            <option value="" disabled selected>-- Select a Group --</option>
+                            <% secretGroups.forEach(group => { %>
+                                <option value="<%= group.id %>"><%= group.name %> (ID: <%= group.id %>)</option>
+                            <% }); %>
+                        <% } else { %>
+                            <option value="" disabled selected>No groups available. Please create a group first.</option>
+                        <% } %>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label for="secretKey">Secret Key:</label>
-                    <input type="text" id="secretKey" name="secretKey" required>
+                    <input type="text" id="secretKey" name="secretKey" required <% if (!secretGroups || secretGroups.length === 0) { %>disabled<% } %>>
                 </div>
                 <div class="form-group">
                     <label for="secretValue">Secret Value (JSON format recommended for complex data):</label>
-                    <textarea id="secretValue" name="secretValue" required></textarea>
+                    <textarea id="secretValue" name="secretValue" required <% if (!secretGroups || secretGroups.length === 0) { %>disabled<% } %>></textarea>
                 </div>
-                <button type="submit" class="btn">Add Secret</button>
+                <button type="submit" class="btn" <% if (!secretGroups || secretGroups.length === 0) { %>disabled<% } %>>Add Secret</button>
             </form>
         <% } %>
+
+        <% if (typeof editingGroup !== 'undefined' && editingGroup) { %>
+        <hr style="margin: 30px 0;">
+        <h2>Rename Secret Group: <%= editingGroup.name %> (ID: <%= editingGroup.id %>)</h2>
+        <form action="/admin/groups/rename/<%= editingGroup.id %>" method="POST" style="margin-bottom: 20px;">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="form-group">
+                <label for="newGroupName">New Group Name:</label>
+                <input type="text" id="newGroupName" name="newGroupName" value="<%= editingGroup.name %>" required>
+            </div>
+            <button type="submit" class="btn">Rename Group</button>
+            <a href="/admin" class="btn btn-secondary" style="margin-left: 10px;">Cancel</a>
+        </form>
+        <% } %>
+
+        <hr style="margin: 30px 0;">
+
+        <h2>Secret Groups</h2>
+
+        <h3>Create New Secret Group</h3>
+        <form action="/admin/groups/create" method="POST" style="margin-bottom: 20px;">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="form-group">
+                <label for="groupName">Group Name:</label>
+                <input type="text" id="groupName" name="groupName" required>
+            </div>
+            <button type="submit" class="btn">Create Group</button>
+        </form>
+
+        <% if (secretGroups && secretGroups.length > 0) { %>
+            <h3>Existing Secret Groups</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Keys in Group</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% secretGroups.forEach(group => { %>
+                        <tr>
+                            <td><%= group.id %></td>
+                            <td><%= group.name %></td>
+                            <td><%= group.keys.length %></td>
+                            <td class="actions">
+                                <a href="/admin/groups/<%= group.id %>/secrets">View/Manage Secrets</a>
+                                <a href="/admin/groups/edit/<%= group.id %>">Rename</a>
+                                <form action="/admin/groups/delete/<%= group.id %>" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete the group \"<%= group.name %>\" (ID: <%= group.id %>)? All secrets within this group will also be permanently deleted.');">
+                                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                                    <button type="submit" class="delete">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        <% } else { %>
+            <p>No secret groups found. Create one above or via API.</p> <!-- Placeholder for create form -->
+        <% } %>
+
+
+        <hr style="margin: 30px 0;">
 
         <h2>Existing Secrets</h2>
         <% if (secrets && secrets.length > 0) { %>

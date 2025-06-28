@@ -9,6 +9,17 @@ import session from 'express-session'; // For CSRF
 import csrf from 'csurf'; // For CSRF
 import crypto from 'crypto'; // For generating temporary session secret
 import * as DataManager from '../lib/dataManager'; // Import DataManager functions
+import {
+    createSecretGroup,
+    getAllSecretGroups,
+    getSecretGroupById,
+    renameSecretGroup,
+    deleteSecretGroup,
+    createSecretInGroup,
+    updateSecretValue,
+    deleteSecret,
+    getSecretWithValue
+} from '../lib/dataManager'; // Specific imports for Phase 1
 import { notifyClientStatusUpdate } from '../websocket/wsServer'; // Import notification function
 import { getConfig, updateAutoApproveSetting } from '../lib/configManager'; // Import configManager functions
 
@@ -192,20 +203,255 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     }
   });
 
+  // UI: Handle deleting a secret from within a group view
+  app.post('/admin/groups/:groupId/secrets/:secretKey/delete', adminAuth, csrfProtection, async (req, res) => {
+    const groupId = parseInt(req.params.groupId, 10); // For redirect
+    const secretKey = decodeURIComponent(req.params.secretKey);
+    try {
+        if (isNaN(groupId)) throw new Error('Invalid group ID for redirect.'); // Should not happen if reached here from valid page
+
+        await deleteSecret(secretKey); // deleteSecret handles removing from group and secrets list
+        res.redirect(`/admin/groups/${groupId}/secrets?message=Secret+deleted+successfully.&messageType=success`);
+    } catch (error: any) {
+        console.error(`Error deleting secret ${secretKey} from group context ${groupId}:`, error);
+        res.redirect(`/admin/groups/${groupId}/secrets?message=Error+deleting+secret:+${encodeURIComponent(error.message)}&messageType=error`);
+    }
+  });
+
+  // UI: Show form to edit a secret's value within a group
+  app.get('/admin/groups/:groupId/secrets/:secretKey/edit', adminAuth, csrfProtection, async (req, res) => {
+    const groupId = parseInt(req.params.groupId, 10);
+    const secretKey = decodeURIComponent(req.params.secretKey); // secretKey might have URL encoded chars
+
+    try {
+        if (isNaN(groupId)) throw new Error('Invalid group ID.');
+
+        const group = getSecretGroupById(groupId);
+        if (!group) throw new Error('Group not found.');
+        if (!group.keys.includes(secretKey)) throw new Error('Secret not found in this group.');
+
+        const secretToEdit = getSecretWithValue(secretKey);
+        if (!secretToEdit) throw new Error('Secret details not found.');
+
+        // Re-fetch other necessary data for rendering group_secrets.ejs
+        const secretsInGroup = group.keys.map(key => {
+            const secretData = getSecretWithValue(key);
+            return { key, value: secretData?.value };
+        }).filter(s => s.value !== undefined);
+
+        res.render('group_secrets', {
+            group,
+            secretsInGroup,
+            message: null, // Or pass from query if needed
+            csrfToken: req.csrfToken(),
+            editingSecretKey: secretKey,
+            secretToEdit: secretToEdit.value
+        });
+
+    } catch (error: any) {
+        console.error(`Error preparing to edit secret ${secretKey} in group ${groupId}:`, error);
+        res.redirect(`/admin/groups/${groupId}/secrets?message=Error+loading+secret+for+edit:+${encodeURIComponent(error.message)}&messageType=error`);
+    }
+  });
+
+  // UI: Handle updating a secret's value within a group
+  app.post('/admin/groups/:groupId/secrets/:secretKey/update', adminAuth, csrfProtection, async (req, res) => {
+    const groupId = parseInt(req.params.groupId, 10);
+    const secretKey = decodeURIComponent(req.params.secretKey);
+    try {
+        if (isNaN(groupId)) throw new Error('Invalid group ID.');
+
+        const { secretValue } = req.body;
+        if (secretValue === undefined) {
+            throw new Error('Secret value is required.');
+        }
+
+        // Optional: Verify secret still belongs to this group before updating if desired, though updateSecretValue only cares about the key.
+        // const currentSecret = getSecretWithValue(secretKey);
+        // if (!currentSecret || currentSecret.groupId !== groupId) {
+        //     throw new Error('Secret not found in this group or group association mismatch.');
+        // }
+
+        let parsedValue = secretValue;
+        try {
+            const trimmedValue = typeof secretValue === 'string' ? secretValue.trim() : secretValue;
+            if (typeof trimmedValue === 'string' && ((trimmedValue.startsWith('{') && trimmedValue.endsWith('}')) || (trimmedValue.startsWith('[') && trimmedValue.endsWith(']')))) {
+                parsedValue = JSON.parse(trimmedValue);
+            }
+        } catch (e) { /* Not valid JSON, store as string */ }
+
+        await updateSecretValue(secretKey, parsedValue);
+        res.redirect(`/admin/groups/${groupId}/secrets?message=Secret+value+updated+successfully.&messageType=success`);
+    } catch (error: any) {
+        console.error(`Error updating secret ${secretKey} in group ${groupId}:`, error);
+        res.redirect(`/admin/groups/${groupId}/secrets/${encodeURIComponent(secretKey)}/edit?message=Error+updating+secret:+${encodeURIComponent(error.message)}&messageType=error`);
+    }
+  });
+
+  // UI: Handle adding a new secret to a specific group
+  app.post('/admin/groups/:groupId/secrets/add', adminAuth, csrfProtection, async (req, res) => {
+    const groupId = parseInt(req.params.groupId, 10);
+    try {
+        if (isNaN(groupId)) {
+            throw new Error('Invalid group ID.');
+        }
+        const { secretKey, secretValue } = req.body;
+        if (!secretKey || typeof secretKey !== 'string' || secretKey.trim() === "" || secretValue === undefined) {
+            throw new Error('Secret key (non-empty string) and value are required.');
+        }
+        // Attempt to parse JSON if applicable, similar to add-secret logic
+        let parsedValue = secretValue;
+        try {
+            const trimmedValue = typeof secretValue === 'string' ? secretValue.trim() : secretValue;
+            if (typeof trimmedValue === 'string' && ((trimmedValue.startsWith('{') && trimmedValue.endsWith('}')) || (trimmedValue.startsWith('[') && trimmedValue.endsWith(']')))) {
+                parsedValue = JSON.parse(trimmedValue);
+            }
+        } catch (e) { /* Not valid JSON, store as string if it was a string */ }
+
+
+        await createSecretInGroup(groupId, secretKey.trim(), parsedValue);
+        res.redirect(`/admin/groups/${groupId}/secrets?message=Secret+added+to+group+successfully.&messageType=success`);
+    } catch (error: any) {
+        console.error(`Error adding secret to group ${groupId}:`, error);
+        res.redirect(`/admin/groups/${groupId}/secrets?message=Error+adding+secret+to+group:+${encodeURIComponent(error.message)}&messageType=error`);
+    }
+  });
+
+  // UI: View/Manage secrets within a specific group
+  app.get('/admin/groups/:groupId/secrets', adminAuth, csrfProtection, async (req, res) => {
+    try {
+        const groupId = parseInt(req.params.groupId, 10);
+        if (isNaN(groupId)) {
+            return res.redirect('/admin?message=Invalid+group+ID+format.&messageType=error');
+        }
+
+        const group = getSecretGroupById(groupId);
+        if (!group) {
+            return res.redirect('/admin?message=Group+not+found.&messageType=error');
+        }
+
+        const secretsInGroup = group.keys.map(key => {
+            const secretData = getSecretWithValue(key);
+            return {
+                key,
+                value: secretData?.value, // Value might be undefined if data is inconsistent
+                // groupId is known to be 'group.id' for these secrets
+            };
+        }).filter(s => s.value !== undefined); // Filter out any inconsistencies if secret value couldn't be fetched
+
+        const message = req.query.message ? { text: req.query.message as string, type: req.query.messageType as string || 'info' } : null;
+
+        // For now, rendering a new EJS view. Could also be a modified admin.ejs
+        res.render('group_secrets', {
+            group,
+            secretsInGroup,
+            message,
+            csrfToken: req.csrfToken(),
+            editingSecretKey: null, // For edit secret form later
+            secretToEdit: null    // For edit secret form later
+        });
+
+    } catch (error: any) {
+        console.error(`Error viewing secrets for group ${req.params.groupId}:`, error);
+        res.redirect(`/admin?message=Error+loading+secrets+for+group:+${encodeURIComponent(error.message)}&messageType=error`);
+    }
+  });
+
+  // UI: Handle the form submission for deleting a group
+  app.post('/admin/groups/delete/:groupId', adminAuth, csrfProtection, async (req, res) => {
+    try {
+        const groupId = parseInt(req.params.groupId, 10);
+        if (isNaN(groupId)) {
+            throw new Error('Invalid group ID.');
+        }
+        await deleteSecretGroup(groupId);
+        res.redirect('/admin?message=Group+and+its+secrets+deleted+successfully.&messageType=success');
+    } catch (error: any) {
+        console.error("Error deleting secret group:", error);
+        res.redirect(`/admin?message=Error+deleting+group:+${encodeURIComponent(error.message)}&messageType=error`);
+    }
+  });
+
+  // UI: Show form to edit/rename a group
+  app.get('/admin/groups/edit/:groupId', adminAuth, csrfProtection, async (req, res) => {
+    try {
+        const groupId = parseInt(req.params.groupId, 10);
+        if (isNaN(groupId)) {
+            return res.redirect('/admin?message=Invalid+group+ID.&messageType=error');
+        }
+        const groupToEdit = getSecretGroupById(groupId);
+        if (!groupToEdit) {
+            return res.redirect('/admin?message=Group+not+found.&messageType=error');
+        }
+
+        // Render the main admin page, but provide data to show the edit group form
+        const allSecretKeysList = DataManager.getAllSecretKeys();
+        const secretsWithValueAndGroup = allSecretKeysList.map(key => {
+            const secretData = DataManager.getSecretWithValue(key);
+            return { key, value: secretData?.value, groupId: secretData?.groupId };
+        });
+        const allGroups = getAllSecretGroups();
+        const message = req.query.message ? { text: req.query.message as string, type: req.query.messageType as string || 'info' } : null;
+
+        res.render('admin', {
+            secrets: secretsWithValueAndGroup,
+            secretGroups: allGroups,
+            editingGroup: groupToEdit, // Pass the group to be edited
+            message,
+            editingItemKey: null, // Not editing a secret key here
+            itemToEdit: null,     // Not editing a secret key value here
+            csrfToken: req.csrfToken()
+        });
+    } catch (error: any) {
+        console.error("Error preparing to edit group:", error);
+        res.redirect(`/admin?message=Error+loading+group+for+edit:+${encodeURIComponent(error.message)}&messageType=error`);
+    }
+  });
+
+  // UI: Handle the form submission for renaming a group
+  app.post('/admin/groups/rename/:groupId', adminAuth, csrfProtection, async (req, res) => {
+    try {
+        const groupId = parseInt(req.params.groupId, 10);
+        const { newGroupName } = req.body;
+
+        if (isNaN(groupId)) {
+            throw new Error('Invalid group ID.');
+        }
+        if (!newGroupName || typeof newGroupName !== 'string' || newGroupName.trim() === "") {
+            throw new Error('New group name must be a non-empty string.');
+        }
+        await renameSecretGroup(groupId, newGroupName.trim());
+        res.redirect('/admin?message=Group+renamed+successfully.&messageType=success');
+    } catch (error: any) {
+        console.error("Error renaming secret group:", error);
+        // Redirect back to the edit page for this group on error, or to main admin page
+        const groupIdParam = req.params.groupId || '';
+        const redirectPath = groupIdParam ? `/admin/groups/edit/${groupIdParam}` : '/admin';
+        res.redirect(`${redirectPath}?message=Error+renaming+group:+${encodeURIComponent(error.message)}&messageType=error`);
+    }
+  });
+
 
   // Protected admin route
   app.get('/admin', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
     try {
-      const allKeys = DataManager.getAllSecretKeys(); // Updated function name
-      const secrets = allKeys.map(key => ({
-        key,
-        value: DataManager.getSecretItem(key) // Updated function name
-      }));
-      // The 'password' variable was passed to EJS for link construction.
+      const allSecretKeysList = DataManager.getAllSecretKeys(); // Get all keys
+      const secretsWithValueAndGroup = allSecretKeysList.map(key => {
+        const secretData = DataManager.getSecretWithValue(key); // Get { value, groupId }
+        return {
+          key,
+          value: secretData ? secretData.value : undefined, // Handle case where secret might be gone if data is inconsistent
+          groupId: secretData ? secretData.groupId : undefined
+        };
+      });
+
+      const secretGroups = DataManager.getAllSecretGroups(); // Fetch all secret groups
+
       const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
 
       res.render('admin', {
-        secrets,
+        secrets: secretsWithValueAndGroup, // Now includes groupId
+        secretGroups, // Pass groups to the template
         password: '', // EJS links will be updated to not use this
         message,
         editingItemKey: null,
@@ -222,37 +468,63 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   app.get('/admin/edit-secret/:key', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
     try {
         const itemKey = decodeURIComponent(req.params.key);
-        const itemToEdit = DataManager.getSecretItem(itemKey); // Updated function name
-        // Password from query is no longer used. Auth is via Bearer token.
+        const secretData = DataManager.getSecretWithValue(itemKey); // Get { value, groupId }
 
-        if (itemToEdit === undefined) {
-            // No currentPassword to pass in redirect
-            res.redirect(`/admin?message=Secret+not+found&messageType=error`);
-            return;
+        if (!secretData) {
+            return res.redirect(`/admin?message=Secret+"${itemKey}"+not+found&messageType=error`);
         }
 
-        const allKeys = DataManager.getAllSecretKeys(); // Updated function name
-        const secrets = allKeys.map(key => ({ key, value: DataManager.getSecretItem(key) })); // Updated function name
+        let groupName = 'N/A (Orphaned or Error)';
+        if (secretData.groupId) {
+            const group = DataManager.getSecretGroupById(secretData.groupId);
+            if (group) {
+                groupName = group.name;
+            } else {
+                console.warn(`Secret "${itemKey}" has groupId ${secretData.groupId}, but group was not found.`);
+            }
+        } else {
+            console.warn(`Secret "${itemKey}" does not have a groupId. This indicates data inconsistency.`);
+        }
+
+        const itemToEditDetails = {
+            value: secretData.value,
+            groupId: secretData.groupId,
+            groupName: groupName
+        };
+
+        // Data for the main admin page (lists of secrets and groups)
+        const allSecretKeysList = DataManager.getAllSecretKeys();
+        const secretsWithValueAndGroup = allSecretKeysList.map(key => {
+            const sData = DataManager.getSecretWithValue(key);
+            return { key, value: sData?.value, groupId: sData?.groupId };
+        });
+        const allGroups = DataManager.getAllSecretGroups();
 
         res.render('admin', {
-            secrets,
-            password: '', // EJS links will be updated
+            secrets: secretsWithValueAndGroup,
+            secretGroups: allGroups,
+            password: '',
             message: null,
             editingItemKey: itemKey,
-            itemToEdit: itemToEdit,
-            csrfToken: req.csrfToken() // Pass CSRF token to template
+            itemToEdit: itemToEditDetails, // Pass new structure
+            csrfToken: req.csrfToken()
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error rendering edit page:", error);
-        // No currentPassword to pass in redirect
-        res.redirect(`/admin?message=Error+loading+edit+page&messageType=error`);
+        res.redirect(`/admin?message=Error+loading+edit+page:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
   // Handle Add Secret
   app.post('/admin/add-secret', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
-    const { secretKey, secretValue } = req.body;
+    const { groupId, secretKey, secretValue } = req.body; // Added groupId
     // currentPassword from query is removed. Bearer token handles auth.
+
+    const numGroupId = parseInt(groupId, 10);
+    if (isNaN(numGroupId)) {
+        return res.redirect(`/admin?message=Error+adding+secret:+Invalid+group+ID.&messageType=error`);
+    }
+
     let parsedValue = secretValue;
     try {
         const trimmedValue = secretValue.trim();
@@ -262,24 +534,35 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     } catch (e) { /* Not valid JSON, store as string */ }
 
     try {
-      if (!secretKey || typeof secretValue === 'undefined') {
-        throw new Error('Secret key and value are required.');
+      // Validation for secretKey and secretValue now happens within createSecretInGroup or earlier.
+      // createSecretInGroup will also check for key uniqueness.
+      // The main check here was for required fields, which is good.
+      if (!secretKey || typeof secretValue === 'undefined' || !groupId) { // Added groupId check
+        throw new Error('Group ID, secret key, and value are required.');
       }
-      if (DataManager.getSecretItem(secretKey) !== undefined) { // Updated function name
-        throw new Error('Secret key already exists. Use edit to modify.');
-      }
-      await DataManager.setSecretItem(secretKey, parsedValue); // Updated function name
-      res.redirect(`/admin?message=Secret+added&messageType=success`);
+      // Deprecated: DataManager.setSecretItem(secretKey, parsedValue);
+      await createSecretInGroup(numGroupId, secretKey, parsedValue); // Use new function
+      res.redirect(`/admin?message=Secret+added+successfully.&messageType=success`);
     } catch (error: any) {
       console.error("Error adding secret:", error);
+      // Consider preserving form fields on error redirect if desired, by passing them in query
       res.redirect(`/admin?message=Error+adding+secret:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
   // Handle Update Secret
   app.post('/admin/update-secret', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
+    // Key renaming is disabled for this form. originalKey and secretKey from form should be the same.
     const { originalKey, secretKey, secretValue } = req.body;
     // currentPassword from query is removed. Bearer token handles auth.
+
+    if (originalKey !== secretKey) {
+        // This UI path for editing secrets does not support renaming the key itself.
+        // That would be a more complex operation (check new key conflicts, update group's key list).
+        // For now, if they differ, it's an error or ignored.
+        return res.redirect(`/admin/edit-secret/${encodeURIComponent(originalKey)}?message=Error+updating+secret:+Key+renaming+not+supported+via+this+form.&messageType=error`);
+    }
+
     let parsedValue = secretValue;
     try {
         const trimmedValue = secretValue.trim();
@@ -289,21 +572,16 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     } catch (e) { /* Store as string if not valid JSON */ }
 
     try {
-        if (!originalKey || !secretKey || typeof secretValue === 'undefined') {
-            throw new Error('Original key, new key, and value are required.');
+        // originalKey and secretKey are the same here due to the check above.
+        if (!originalKey || typeof secretValue === 'undefined') {
+            throw new Error('Secret key and value are required.');
         }
-        if (originalKey !== secretKey) {
-            if (DataManager.getSecretItem(secretKey) !== undefined) { // Corrected: getSecretItem
-                 throw new Error(`New key "${secretKey}" already exists. Choose a different key.`);
-            }
-            await DataManager.deleteSecretItem(originalKey); // Corrected: deleteSecretItem
-            await DataManager.setSecretItem(secretKey, parsedValue); // Corrected: setSecretItem
-        } else {
-            await DataManager.setSecretItem(originalKey, parsedValue); // Corrected: setSecretItem
-        }
-        res.redirect(`/admin?message=Secret+updated&messageType=success`);
+        // The old logic for key renaming (if originalKey !== secretKey) is removed.
+        // We only update the value.
+        await updateSecretValue(originalKey, parsedValue); // Use new function
+        res.redirect(`/admin?message=Secret+value+updated+successfully.&messageType=success`);
     } catch (error: any) {
-        console.error("Error updating secret:", error);
+        console.error("Error updating secret value:", error);
         res.redirect(`/admin/edit-secret/${encodeURIComponent(originalKey)}?message=Error+updating+secret:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
@@ -342,21 +620,32 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   // Note: GET routes for clients already have csrfProtection for token generation
   app.get('/admin/clients', adminAuth, csrfProtection, async (req, res) => {
     try {
-      const pendingClients = DataManager.getPendingClients();
-      const approvedClients = DataManager.getApprovedClients();
-      // currentPassword from query is removed.
+      const rawPendingClients = DataManager.getPendingClients(); // synchronous
+      const rawApprovedClients = DataManager.getApprovedClients(); // synchronous
+      const allGroups = DataManager.getAllSecretGroups(); // synchronous
+
+      const groupMap = new Map(allGroups.map(g => [g.id, g.name]));
+
+      const enhanceClientWithGroupNames = (client: DataManager.ClientInfo) => ({
+        ...client,
+        associatedGroupNames: client.associatedGroupIds?.map(id => groupMap.get(id) || `ID ${id} (Unknown)`).join(', ') || 'None'
+      });
+
+      const pendingClients = rawPendingClients.map(enhanceClientWithGroupNames);
+      const approvedClients = rawApprovedClients.map(enhanceClientWithGroupNames);
+
       const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
 
       res.render('clients', {
         pendingClients,
         approvedClients,
-        password: '', // EJS links will be updated
+        password: '',
         message,
-        managingClientSecrets: null, // Not managing specific client secrets by default
-        autoApproveWsEnabled: getConfig().autoApproveWebSocketRegistrations, // Pass current state to template
-        csrfToken: req.csrfToken() // Pass CSRF token to template
+        managingClientGroups: null, // Changed from managingClientSecrets
+        autoApproveWsEnabled: getConfig().autoApproveWebSocketRegistrations,
+        csrfToken: req.csrfToken()
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error rendering clients page:", error);
       res.status(500).send("Error loading client management page.");
     }
@@ -399,100 +688,58 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     }
   });
 
-  app.get('/admin/clients/:clientId/secrets', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
+  // Route to manage a client's associated groups
+  app.get('/admin/clients/:clientId/groups', adminAuth, csrfProtection, async (req, res) => {
     const { clientId } = req.params;
-    // currentPassword from query is removed.
     try {
-      const client = DataManager.getClient(clientId);
+      const client = DataManager.getClient(clientId); // getClient is synchronous
       if (!client || client.status !== 'approved') {
-        res.redirect(`/admin/clients?message=Client+not+found+or+not+approved.&messageType=error`);
-        return;
+        return res.redirect(`/admin/clients?message=Client+not+found+or+not+approved.&messageType=error`);
       }
-      const allSecretKeys = DataManager.getAllSecretKeys();
+
+      const allGroups = DataManager.getAllSecretGroups(); // synchronous
       const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
 
-      // Render the same clients.ejs but with a special state for managing one client's secrets
       res.render('clients', {
-        pendingClients: [], // Not needed for this view part
-        approvedClients: [], // Not needed for this view part
-        password: '', // EJS links will be updated
+        pendingClients: [],
+        approvedClients: [],
+        password: '',
         message,
-        managingClientSecrets: {
+        managingClientGroups: { // Renamed from managingClientSecrets
           client: client,
-          allSecrets: allSecretKeys
+          allGroups: allGroups, // Pass all available groups
+          // client.associatedGroupIds is already part of the client object
         },
-        csrfToken: req.csrfToken() // Pass CSRF token to template
+        autoApproveWsEnabled: getConfig().autoApproveWebSocketRegistrations,
+        csrfToken: req.csrfToken()
       });
     } catch (error: any) {
-      res.redirect(`/admin/clients?message=Error+loading+secret+management+for+client:+${encodeURIComponent(error.message)}&messageType=error`);
+      res.redirect(`/admin/clients?message=Error+loading+group+management+for+client:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
-  app.post('/admin/clients/:clientId/secrets/update', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection to POST route
+  // Route to update a client's associated groups
+  app.post('/admin/clients/:clientId/groups/update', adminAuth, csrfProtection, async (req, res) => {
     const { clientId } = req.params;
-    let { associatedSecretKeys } = req.body; // This will be an array or single string if only one selected
-    // currentPassword from query is removed.
+    let { associatedGroupIds } = req.body; // This will be an array or single string if only one selected
 
-    if (!Array.isArray(associatedSecretKeys)) {
-        associatedSecretKeys = associatedSecretKeys ? [associatedSecretKeys] : [];
+    // Ensure associatedGroupIds is an array of numbers
+    if (!Array.isArray(associatedGroupIds)) {
+        associatedGroupIds = associatedGroupIds ? [associatedGroupIds] : [];
     }
+    const groupIdsAsNumbers: number[] = associatedGroupIds.map((id: string | number) => parseInt(id.toString(), 10)).filter((id: number) => !isNaN(id));
 
     try {
-      const client = DataManager.getClient(clientId);
+      const client = DataManager.getClient(clientId); // synchronous
       if (!client || client.status !== 'approved') {
         throw new Error("Client not found or not approved.");
       }
 
-      // Get all currently available secret keys to validate against
-      const allValidSecretKeys = DataManager.getAllSecretKeys();
-      const validKeysToAssociate = associatedSecretKeys.filter((key: string) => allValidSecretKeys.includes(key));
+      await DataManager.setClientAssociatedGroups(clientId, groupIdsAsNumbers);
 
-      // Update client's associated keys: first clear existing, then add selected ones.
-      // A more efficient way might be to find differences, but this is straightforward.
-      client.associatedSecretKeys = []; // Clear current associations
-      for (const secretKey of validKeysToAssociate) {
-          // The DataManager.associateSecretWithClient is additive and checks for duplicates.
-          // We are rebuilding the list here directly on the client object before a single save.
-          // This is a conceptual simplification. For robustness, one might call associate for each.
-          // Let's refine this to call DataManager for each association for consistency with its design.
-          // However, the current DataManager.associateSecretWithClient saves on each call.
-          // For multiple updates, it's better to have a function like `setClientAssociatedSecrets`.
-          // Lacking that, we'll update the client object directly and save once. This means
-          // the `associateSecretWithClient` and `dissociateSecretFromClient` might be more for single operations.
-          // Let's assume we'll update the client object directly and then save.
-      }
-      client.associatedSecretKeys = validKeysToAssociate; // Directly set the new list
-      client.dateUpdated = new Date().toISOString();
-      // Need a function in DataManager to update a client object or save the whole store.
-      // `DataManager.setItem` is for secrets. Let's add a `updateClient` function to DataManager.
-      // For now, we'll rely on the fact that `client` is a reference from `dataStore.clients[clientId]`
-      // and `saveData` will persist it. This is risky if getClient returns a copy.
-      // Corrected approach: getClient returns a copy, so we need an updateClient function.
-      // I will add a placeholder for such a function and then implement it in DataManager.
-
-      // This is a temporary direct modification before adding updateClient
-      // dataStore.clients[client.id] = client; // This won't work if getClient returns a deep copy
-      // await DataManager.saveData(); // This would save the whole store
-      // The above is incorrect because getClient returns a deep copy.
-      // Proper way: fetch original client, modify, then use a new update function.
-
-      // Let's use existing associate/dissociate for now, though less efficient for bulk.
-      const originalClientData = DataManager.getClient(clientId); // Fetch original again
-      if (!originalClientData) throw new Error("Client disappeared");
-
-      const keysToAdd = validKeysToAssociate.filter((key:string) => !originalClientData.associatedSecretKeys.includes(key));
-      const keysToRemove = originalClientData.associatedSecretKeys.filter((key:string) => !validKeysToAssociate.includes(key));
-
-      for (const key of keysToAdd) {
-        await DataManager.associateSecretWithClient(clientId, key);
-      }
-      for (const key of keysToRemove) {
-        await DataManager.dissociateSecretFromClient(clientId, key);
-      }
-
-      res.redirect(`/admin/clients/${clientId}/secrets?message=Client+secret+associations+updated.&messageType=success`);
+      res.redirect(`/admin/clients/${clientId}/groups?message=Client+group+associations+updated.&messageType=success`);
     } catch (error: any) {
-      res.redirect(`/admin/clients/${clientId}/secrets?message=Error+updating+associations:+${encodeURIComponent(error.message)}&messageType=error`);
+      res.redirect(`/admin/clients/${clientId}/groups?message=Error+updating+group+associations:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
@@ -535,6 +782,149 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   // It's important that the CSRF error handler is added before any generic
   // error handler that might catch all errors and send a 500 response without
   // checking the error type. If no other generic error handler exists, this is fine.
+
+  // --- Phase 1: API Endpoints for Group and Secret Management (for testing) ---
+
+  // Groups
+  // API endpoint (already created in Phase 1)
+  app.post('/admin/api/groups', adminAuth, csrfProtection, async (req, res) => {
+    try {
+      const { name } = req.body;
+      if (!name) {
+        return res.status(400).json({ error: 'Group name is required.' });
+      }
+      const newGroup = await createSecretGroup(name); // Use direct import
+      res.status(201).json(newGroup);
+    } catch (error: any) {
+      res.status(error.message.includes("already exists") ? 409 : 500).json({ error: error.message });
+    }
+  });
+
+  // UI Form Handler for Creating Groups
+  app.post('/admin/groups/create', adminAuth, csrfProtection, async (req, res) => {
+    try {
+        const { groupName } = req.body;
+        if (!groupName || typeof groupName !== 'string' || groupName.trim() === "") {
+            throw new Error('Group name must be a non-empty string.');
+        }
+        await createSecretGroup(groupName.trim());
+        res.redirect('/admin?message=Secret+group+created+successfully.&messageType=success');
+    } catch (error: any) {
+        console.error("Error creating secret group:", error);
+        res.redirect(`/admin?message=Error+creating+secret+group:+${encodeURIComponent(error.message)}&messageType=error`);
+    }
+  });
+
+  app.get('/admin/api/groups', adminAuth, async (req, res) => { // Should be synchronous based on DataManager
+    try {
+      const groups = getAllSecretGroups(); // Use direct import
+      res.json(groups);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/admin/api/groups/:groupId', adminAuth, async (req, res) => { // Should be synchronous
+    try {
+      const groupId = parseInt(req.params.groupId, 10);
+      if (isNaN(groupId)) {
+        return res.status(400).json({ error: 'Invalid group ID format.' });
+      }
+      const group = getSecretGroupById(groupId); // Use direct import
+      if (group) {
+        res.json(group);
+      } else {
+        res.status(404).json({ error: 'Group not found.' });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put('/admin/api/groups/:groupId', adminAuth, csrfProtection, async (req, res) => {
+    try {
+      const groupId = parseInt(req.params.groupId, 10);
+      const { name } = req.body;
+      if (isNaN(groupId)) {
+        return res.status(400).json({ error: 'Invalid group ID format.' });
+      }
+      if (!name) {
+        return res.status(400).json({ error: 'New group name is required.' });
+      }
+      await renameSecretGroup(groupId, name); // Use direct import
+      res.status(200).json({ message: 'Group renamed successfully.' });
+    } catch (error: any) {
+      res.status(error.message.includes("not found") ? 404 : error.message.includes("already exists") ? 409 : 500).json({ error: error.message });
+    }
+  });
+
+  app.delete('/admin/api/groups/:groupId', adminAuth, csrfProtection, async (req, res) => {
+    try {
+      const groupId = parseInt(req.params.groupId, 10);
+      if (isNaN(groupId)) {
+        return res.status(400).json({ error: 'Invalid group ID format.' });
+      }
+      await deleteSecretGroup(groupId); // Use direct import
+      res.status(200).json({ message: 'Group and its secrets deleted successfully.' });
+    } catch (error: any) {
+      res.status(error.message.includes("not found") ? 404 : 500).json({ error: error.message });
+    }
+  });
+
+  // Secrets (within groups)
+  app.post('/admin/api/secrets', adminAuth, csrfProtection, async (req, res) => {
+    try {
+      const { groupId, key, value } = req.body;
+      if (typeof groupId !== 'number' || !key || value === undefined) {
+        return res.status(400).json({ error: 'groupId (number), key (string), and value are required.' });
+      }
+      await createSecretInGroup(groupId, key, value); // Use direct import
+      res.status(201).json({ message: 'Secret created successfully in group.' });
+    } catch (error: any) {
+      res.status(error.message.includes("not found") ? 404 : error.message.includes("already exists") ? 409 : 500).json({ error: error.message });
+    }
+  });
+
+  app.put('/admin/api/secrets/:key', adminAuth, csrfProtection, async (req, res) => {
+    try {
+      const { key } = req.params;
+      const { value } = req.body;
+      if (value === undefined) {
+        return res.status(400).json({ error: 'New value is required.' });
+      }
+      await updateSecretValue(key, value); // Use direct import
+      res.status(200).json({ message: 'Secret value updated successfully.' });
+    } catch (error: any) {
+      res.status(error.message.includes("not found") ? 404 : 500).json({ error: error.message });
+    }
+  });
+
+  app.delete('/admin/api/secrets/:key', adminAuth, csrfProtection, async (req, res) => {
+    try {
+      const { key } = req.params;
+      await deleteSecret(key); // Use direct import
+      res.status(200).json({ message: 'Secret deleted successfully.' });
+    } catch (error: any) {
+      // deleteSecret in DataManager currently doesn't throw if key not found, just warns.
+      // If it were to throw, a 404 check would be good here.
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/admin/api/secrets/:key', adminAuth, async (req, res) => { // Should be synchronous
+    try {
+      const { key } = req.params;
+      const secret = getSecretWithValue(key); // Use direct import
+      if (secret) {
+        res.json(secret);
+      } else {
+        res.status(404).json({ error: 'Secret not found.' });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
 
   return server; // Return the Node.js HTTP server instance
 }
