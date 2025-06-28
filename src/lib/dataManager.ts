@@ -16,24 +16,26 @@ export interface ClientInfo {
   id: string; // Unique client identifier (e.g., a UUID)
   name: string; // User-friendly name provided by the client or admin
   status: ClientStatus;
-  // authToken removed - WebSocket access will be globally controlled
-  associatedSecretKeys: string[]; // Keys of secrets this client can access
-  // temporaryId removed
-  requestedSecretKeys?: string[]; // Optional: Keys initially requested by the client
+  associatedGroupIds: number[]; // IDs of secret groups this client can access
+  requestedSecretKeys?: string[]; // Optional: Keys initially requested by the client (legacy, consider removing or adapting for group requests)
   registrationTimestamp?: number; // Timestamp (Date.now()) when client entered pending state, for expiry
   dateCreated: string; // ISO 8601 date string
   dateUpdated: string; // ISO 8601 date string
 }
 
 interface SecureDataStore {
-  secrets: Record<string, any>; // Existing secrets key-value store
+  secrets: { [key: string]: { value: any, groupId: number } };
   clients: Record<string, ClientInfo>; // Keyed by ClientInfo.id
+  secretGroups: { [groupId: number]: { name: string, keys: string[] } };
+  nextGroupId: number;
 }
 
 // In-memory store for the decrypted data
 let dataStore: SecureDataStore = {
   secrets: {},
   clients: {},
+  secretGroups: {},
+  nextGroupId: 1,
 };
 let masterEncryptionKey: Buffer | null = null;
 
@@ -119,38 +121,69 @@ async function loadData(): Promise<void> {
     const encryptedData = await fs.readFile(DATA_FILE_PATH, 'utf-8');
     if (encryptedData.trim() === '') {
         console.log('Data file is empty. Initializing with an empty store.');
-        dataStore = { secrets: {}, clients: {} }; // Ensure it matches SecureDataStore type
+        // Initialize with the full new structure
+        dataStore = { secrets: {}, clients: {}, secretGroups: {}, nextGroupId: 1 };
         return;
     }
     const decryptedJson = decrypt(encryptedData, masterEncryptionKey);
     if (decryptedJson) {
-      const loadedStore = JSON.parse(decryptedJson);
-      // Ensure structure compatibility with SecureDataStore
+      const loadedStore = JSON.parse(decryptedJson) as Partial<SecureDataStore>;
+
+      // Initialize with defaults and then override with loaded data
       dataStore = {
-        secrets: loadedStore.secrets || (loadedStore.clients ? {} : loadedStore) || {}, // Handle old format where dataStore was just secrets
-        clients: loadedStore.clients || {}
+        secrets: loadedStore.secrets || {},
+        clients: loadedStore.clients || {}, // Will be further processed below
+        secretGroups: loadedStore.secretGroups || {},
+        nextGroupId: loadedStore.nextGroupId || 1,
       };
-      if(!loadedStore.secrets && !loadedStore.clients && Object.keys(loadedStore).length > 0) {
-        console.warn("Loaded data seems to be in an older format (only secrets). Migrating to new structure.");
+
+      // Ensure all loaded clients have associatedGroupIds initialized
+      for (const clientId in dataStore.clients) {
+        if (dataStore.clients.hasOwnProperty(clientId)) {
+          const client = dataStore.clients[clientId] as any; // Use 'as any' for transitional period
+          if (client.associatedSecretKeys && !client.associatedGroupIds) {
+            console.log(`Client ${clientId} has legacy 'associatedSecretKeys'. Initializing 'associatedGroupIds' to empty. Manual group association needed.`);
+            client.associatedGroupIds = [];
+            // Delete the old key to prevent confusion, or leave for manual inspection
+            // delete client.associatedSecretKeys;
+          } else if (!client.associatedGroupIds) {
+            client.associatedGroupIds = [];
+          }
+        }
       }
+
+      // Basic migration/check for old secrets structure
+      // If secrets are not in the new { value, groupId } format, they will be problematic.
+      // For Phase 1, we'll log if an old format secret is detected.
+      // A more robust migration would be needed for existing data.
+      let oldFormatSecretsDetected = false;
+      for (const key in dataStore.secrets) {
+        if (typeof dataStore.secrets[key] !== 'object' ||
+            dataStore.secrets[key] === null ||
+            !dataStore.secrets[key].hasOwnProperty('value') ||
+            !dataStore.secrets[key].hasOwnProperty('groupId')) {
+          console.warn(`Secret "${key}" has an outdated format and will be ignored or may cause errors. Please re-create it in a group.`);
+          // Optionally delete it: delete dataStore.secrets[key];
+          oldFormatSecretsDetected = true;
+        }
+      }
+      if (oldFormatSecretsDetected) {
+          console.warn("Old format secrets detected. These should be migrated or re-created within groups.");
+          // Consider if a saveData() call is needed here if old secrets were deleted.
+      }
+
       console.log('Data loaded and decrypted successfully.');
     } else {
       // This case could mean the file is corrupt or the password was wrong.
-      // If password was wrong, masterEncryptionKey would be wrong.
       console.error('Failed to decrypt data. The file might be corrupted or the password was incorrect.');
-      // Decide on a recovery strategy:
-      // 1. Throw an error and stop the server.
-      // 2. Start with an empty data store (potential data loss if password was just mistyped).
-      // 3. Backup the corrupted file and start fresh.
-      // For now, let's throw, as this is critical.
       throw new Error('Failed to decrypt data file. Check password or file integrity.');
     }
   } catch (error: any) {
     if (error.code === 'ENOENT') {
       console.log(`Data file not found at ${DATA_FILE_PATH}. Initializing with an empty store.`);
-      dataStore = { secrets: {}, clients: {} }; // Initialize with new structure
-      // Optionally save the empty store immediately to create the file
-      // await saveData();
+      // Initialize with the full new structure
+      dataStore = { secrets: {}, clients: {}, secretGroups: {}, nextGroupId: 1 };
+      // Optionally save the empty store immediately to create the file: await saveData();
     } else {
       console.error('Error loading data:', error);
       throw error; // Re-throw other errors
@@ -177,39 +210,122 @@ export async function saveData(): Promise<void> {
 }
 
 /**
- * Retrieves a secret value from the data store by key.
+ * Retrieves a secret's value and its group ID.
  */
-export function getSecretItem<T = any>(key: string): T | undefined {
-  return dataStore.secrets[key] as T | undefined;
+export function getSecretWithValue(key: string): { value: any, groupId: number } | undefined {
+  return dataStore.secrets[key] ? { ...dataStore.secrets[key] } : undefined; // Return a copy
 }
 
 /**
+ * Retrieves only the secret value from the data store by key.
+ * Note: For new development, prefer getSecretWithValue if groupId is also needed.
+ */
+export function getSecretItem<T = any>(key: string): T | undefined {
+  const secret = dataStore.secrets[key];
+  return secret ? secret.value as T : undefined;
+}
+
+/**
+ * Creates a new secret within a specified group.
+ * Throws an error if the group doesn't exist or the secret key already exists.
+ */
+export async function createSecretInGroup(groupId: number, key: string, value: any): Promise<void> {
+  if (!dataStore.secretGroups[groupId]) {
+    throw new Error(`Group with ID "${groupId}" not found.`);
+  }
+  if (dataStore.secrets.hasOwnProperty(key)) {
+    throw new Error(`Secret with key "${key}" already exists.`);
+  }
+  if (!key || typeof key !== 'string' || key.trim() === "") {
+    throw new Error("Secret key must be a non-empty string.");
+  }
+
+  dataStore.secrets[key] = { value, groupId };
+  if (!dataStore.secretGroups[groupId].keys.includes(key)) { // Should not be there, but good check
+    dataStore.secretGroups[groupId].keys.push(key);
+  }
+  await saveData();
+  console.log(`Secret "${key}" created in group ID ${groupId}.`);
+}
+
+/**
+ * Updates the value of an existing secret. The group association does not change.
+ */
+export async function updateSecretValue(key: string, newValue: any): Promise<void> {
+  if (!dataStore.secrets.hasOwnProperty(key)) {
+    throw new Error(`Secret with key "${key}" not found.`);
+  }
+  dataStore.secrets[key].value = newValue;
+  await saveData();
+  console.log(`Secret "${key}" value updated.`);
+}
+
+/**
+ * Deletes a secret.
+ * It's removed from its group and from the main secrets store.
+ */
+export async function deleteSecret(key: string): Promise<void> {
+  if (!dataStore.secrets.hasOwnProperty(key)) {
+    console.warn(`Secret with key "${key}" not found for deletion.`);
+    return; // Or throw error if preferred
+  }
+
+  const { groupId } = dataStore.secrets[key];
+  delete dataStore.secrets[key];
+
+  if (dataStore.secretGroups[groupId]) {
+    const keyIndex = dataStore.secretGroups[groupId].keys.indexOf(key);
+    if (keyIndex > -1) {
+      dataStore.secretGroups[groupId].keys.splice(keyIndex, 1);
+    } else {
+        console.warn(`Secret key "${key}" was not found in its associated group ID ${groupId}'s key list during deletion.`);
+    }
+  } else {
+    console.warn(`Group ID ${groupId} associated with secret "${key}" was not found during secret deletion.`);
+  }
+
+  // Client associations are group-based, so deleting a secret does not directly affect client records here.
+  // The secret is simply removed from its group's key list (already done) and from the global secrets list.
+  // Any client associated with that group will no longer see this secret via getSecretsForClient.
+  // The old logic for removing from client.associatedSecretKeys is confirmed removed.
+
+  await saveData();
+  console.log(`Secret "${key}" deleted.`);
+}
+
+
+/**
+ * (DEPRECATED - use createSecretInGroup or updateSecretValue)
  * Sets a secret value in the data store by key.
  * Automatically triggers a save after setting the item.
  */
 export async function setSecretItem<T = any>(key: string, value: T): Promise<void> {
-  dataStore.secrets[key] = value;
+  // This function is problematic with the new structure as it doesn't know the group.
+  // For now, it will log a warning. Ideally, all callers should be updated.
+  console.warn(`DEPRECATED: setSecretItem called for key "${key}". This function does not handle group associations. Use createSecretInGroup or updateSecretValue.`);
+  // To avoid breaking existing functionality entirely before full migration,
+  // we could try to find its group or assign to a default/placeholder if that existed.
+  // But the requirement is "secret must belong to exactly one group".
+  // If the secret already exists, we can update its value. If not, we can't create it without a group.
+  if (dataStore.secrets.hasOwnProperty(key)) {
+    dataStore.secrets[key].value = value;
+  } else {
+    // Cannot create a new secret without a groupId.
+    // Option 1: Throw error. Option 2: Log and do nothing for new keys.
+    throw new Error(`setSecretItem cannot create new secret "${key}" without a groupId. Use createSecretInGroup.`);
+  }
   await saveData();
 }
 
 /**
+ * (DEPRECATED - use deleteSecret)
  * Deletes a secret item from the data store by key.
  * Also removes this secret key from any client's associatedSecretKeys list.
  * Automatically triggers a save after deleting the item.
  */
 export async function deleteSecretItem(key: string): Promise<void> {
-  if (dataStore.secrets.hasOwnProperty(key)) {
-    delete dataStore.secrets[key];
-    // Remove this secret key from all clients' associatedSecretKeys
-    Object.values(dataStore.clients).forEach(client => {
-        const index = client.associatedSecretKeys.indexOf(key);
-        if (index > -1) {
-            client.associatedSecretKeys.splice(index, 1);
-            client.dateUpdated = new Date().toISOString();
-        }
-    });
-    await saveData();
-  }
+  console.warn(`DEPRECATED: deleteSecretItem called for key "${key}". Use deleteSecret instead.`);
+  await deleteSecret(key); // Delegate to the new function
 }
 
 /**
@@ -226,6 +342,137 @@ export function getAllSecretKeys(): string[] {
 export function getEntireStore(): SecureDataStore {
     return JSON.parse(JSON.stringify(dataStore)); // Return a deep copy
 }
+
+// --- Secret Group Management Functions ---
+
+function _getNextGroupId(): number {
+  // This function assumes dataStore is already initialized.
+  // It modifies dataStore directly. The caller that uses this should ensure saveData is called.
+  if (dataStore.nextGroupId === undefined) {
+    dataStore.nextGroupId = 1; // Should have been initialized by loadData or initial declaration
+  }
+  const id = dataStore.nextGroupId;
+  dataStore.nextGroupId += 1;
+  return id;
+}
+
+export function getGroupByName(name: string): { id: number, name: string, keys: string[] } | undefined {
+    for (const idStr in dataStore.secretGroups) {
+        const id = parseInt(idStr, 10);
+        if (dataStore.secretGroups[id].name === name) {
+            return { id, ...dataStore.secretGroups[id] };
+        }
+    }
+    return undefined;
+}
+
+export async function createSecretGroup(name: string): Promise<{ id: number, name: string }> {
+  if (!name || typeof name !== 'string' || name.trim() === "") {
+    throw new Error("Group name must be a non-empty string.");
+  }
+  if (getGroupByName(name)) {
+    throw new Error(`A secret group with the name "${name}" already exists.`);
+  }
+
+  const newGroupId = _getNextGroupId(); // Increments nextGroupId but doesn't save yet
+  dataStore.secretGroups[newGroupId] = { name: name.trim(), keys: [] };
+  await saveData(); // Now save explicitly
+  console.log(`Secret group "${name}" created with ID ${newGroupId}.`);
+  return { id: newGroupId, name: dataStore.secretGroups[newGroupId].name };
+}
+
+export function getSecretGroupById(groupId: number): { id: number, name: string, keys: string[] } | undefined {
+  if (dataStore.secretGroups[groupId]) {
+    return { id: groupId, ...dataStore.secretGroups[groupId] };
+  }
+  return undefined;
+}
+
+export function getAllSecretGroups(): { id: number, name: string, keys: string[] }[] {
+  return Object.entries(dataStore.secretGroups).map(([idStr, groupData]) => {
+    const id = parseInt(idStr, 10);
+    return {
+      id,
+      name: groupData.name,
+      keys: [...groupData.keys] // Return a copy of the keys array
+    };
+  });
+}
+
+export async function renameSecretGroup(groupId: number, newName: string): Promise<void> {
+  if (!newName || typeof newName !== 'string' || newName.trim() === "") {
+    throw new Error("New group name must be a non-empty string.");
+  }
+  const group = dataStore.secretGroups[groupId];
+  if (!group) {
+    throw new Error(`Secret group with ID "${groupId}" not found.`);
+  }
+  const existingGroupWithNewName = getGroupByName(newName.trim());
+  if (existingGroupWithNewName && existingGroupWithNewName.id !== groupId) {
+    throw new Error(`Another secret group with the name "${newName.trim()}" already exists.`);
+  }
+
+  group.name = newName.trim();
+  await saveData();
+  console.log(`Secret group ID ${groupId} renamed to "${group.name}".`);
+}
+
+export async function deleteSecretGroup(groupId: number): Promise<void> {
+  const group = dataStore.secretGroups[groupId];
+  if (!group) {
+    throw new Error(`Secret group with ID "${groupId}" not found.`);
+  }
+
+  const keysToDelete = [...group.keys]; // Create a copy as we'll be modifying the secrets store
+
+  console.log(`Deleting group "${group.name}" (ID: ${groupId}) and its ${keysToDelete.length} secret(s)...`);
+
+  for (const key of keysToDelete) {
+    if (dataStore.secrets.hasOwnProperty(key)) {
+      // Ensure the secret actually belongs to this group before deleting, as a sanity check
+      if (dataStore.secrets[key].groupId === groupId) {
+        delete dataStore.secrets[key];
+        console.log(`  - Deleted secret "${key}" from group ${groupId}.`);
+      } else {
+        // This case should ideally not happen if data integrity is maintained
+        console.warn(`  - Secret "${key}" was listed in group ${groupId} but its record indicates it belongs to group ${dataStore.secrets[key].groupId}. Not deleting from secrets map based on this group's list.`);
+        // However, we should remove it from the current group's key list if it's there due to some inconsistency
+        const keyIndexInGroup = group.keys.indexOf(key);
+        if (keyIndexInGroup > -1) {
+            group.keys.splice(keyIndexInGroup, 1);
+        }
+      }
+    } else {
+      console.warn(`  - Secret key "${key}" listed in group ${groupId} not found in main secrets store.`);
+       // Remove from group's key list if present, to clean up inconsistency
+        const keyIndexInGroup = group.keys.indexOf(key);
+        if (keyIndexInGroup > -1) {
+            group.keys.splice(keyIndexInGroup, 1);
+        }
+    }
+  }
+
+  delete dataStore.secretGroups[groupId];
+  console.log(`Group ID ${groupId} ("${group.name}") itself deleted.`);
+
+  // Update clients that were associated with this deleted group
+  let clientsUpdated = false;
+  for (const clientId in dataStore.clients) {
+    const client = dataStore.clients[clientId];
+    if (client.associatedGroupIds && client.associatedGroupIds.includes(groupId)) {
+      client.associatedGroupIds = client.associatedGroupIds.filter(id => id !== groupId);
+      client.dateUpdated = new Date().toISOString();
+      clientsUpdated = true;
+      console.log(`Removed deleted group ID ${groupId} from client ${clientId}.`);
+    }
+  }
+
+  await saveData(); // This will save group deletion and any client updates.
+  if (clientsUpdated) {
+    console.log("Client associations updated due to group deletion.");
+  }
+}
+
 
 // --- Client Management Functions ---
 
@@ -255,10 +502,10 @@ export async function addPendingClient(
     id: clientId,
     name: clientName.trim(),
     status: 'pending',
-    associatedSecretKeys: [],
-    // temporaryId: temporaryId, // Removed
-    requestedSecretKeys: requestedSecretKeys || [],
-    registrationTimestamp: Date.now(), // Set registration timestamp
+    associatedGroupIds: [], // Initialize with empty group IDs
+    // associatedSecretKeys: [], // Removed
+    requestedSecretKeys: requestedSecretKeys || [], // Keep for now, may adapt later
+    registrationTimestamp: Date.now(),
     dateCreated: now,
     dateUpdated: now,
   };
@@ -365,25 +612,44 @@ export function getApprovedClients(): ClientInfo[] {
     .map(client => JSON.parse(JSON.stringify(client)));
 }
 
+//
+// OLD FUNCTIONS - TO BE REMOVED
+//
+// /**
+//  * (REMOVED - Clients are now associated with groups, not individual keys)
+//  * Associates a secret key with an approved client.
+//  */
+// export async function associateSecretWithClient(clientId: string, secretKey: string): Promise<ClientInfo> { ... }
+
+// /**
+//  * (REMOVED - Clients are now associated with groups, not individual keys)
+//  * Dissociates a secret key from a client.
+//  */
+// export async function dissociateSecretFromClient(clientId: string, secretKey: string): Promise<ClientInfo> { ... }
+//
+
 /**
- * Associates a secret key with an approved client.
+ * Associates a secret group with an approved client.
  * @param clientId The ID of the client.
- * @param secretKey The secret key to associate.
+ * @param groupId The ID of the group to associate.
  */
-export async function associateSecretWithClient(clientId: string, secretKey: string): Promise<ClientInfo> {
+export async function associateGroupWithClient(clientId: string, groupId: number): Promise<ClientInfo> {
   const client = dataStore.clients[clientId];
   if (!client) {
     throw new Error(`Client with ID "${clientId}" not found.`);
   }
   if (client.status !== 'approved') {
-    throw new Error(`Client "${clientId}" is not approved. Cannot associate secrets.`);
+    throw new Error(`Client "${clientId}" is not approved. Cannot associate groups.`);
   }
-  if (!dataStore.secrets.hasOwnProperty(secretKey)) {
-    throw new Error(`Secret with key "${secretKey}" not found.`);
+  if (!dataStore.secretGroups[groupId]) {
+    throw new Error(`Secret group with ID "${groupId}" not found.`);
   }
 
-  if (!client.associatedSecretKeys.includes(secretKey)) {
-    client.associatedSecretKeys.push(secretKey);
+  if (!client.associatedGroupIds) { // Should be initialized by now, but as a safeguard
+    client.associatedGroupIds = [];
+  }
+  if (!client.associatedGroupIds.includes(groupId)) {
+    client.associatedGroupIds.push(groupId);
     client.dateUpdated = new Date().toISOString();
     await saveData();
   }
@@ -391,25 +657,77 @@ export async function associateSecretWithClient(clientId: string, secretKey: str
 }
 
 /**
- * Dissociates a secret key from a client.
+ * Dissociates a secret group from a client.
  * @param clientId The ID of the client.
- * @param secretKey The secret key to dissociate.
+ * @param groupId The ID of the group to dissociate.
  */
-export async function dissociateSecretFromClient(clientId: string, secretKey: string): Promise<ClientInfo> {
+export async function dissociateGroupFromClient(clientId: string, groupId: number): Promise<ClientInfo> {
   const client = dataStore.clients[clientId];
   if (!client) {
     throw new Error(`Client with ID "${clientId}" not found.`);
   }
-  // No status check needed for dissociation, can be done for any client state.
+  if (!client.associatedGroupIds) { // Safeguard
+    client.associatedGroupIds = [];
+    return JSON.parse(JSON.stringify(client)); // Nothing to dissociate
+  }
 
-  const index = client.associatedSecretKeys.indexOf(secretKey);
+  const index = client.associatedGroupIds.indexOf(groupId);
   if (index > -1) {
-    client.associatedSecretKeys.splice(index, 1);
+    client.associatedGroupIds.splice(index, 1);
     client.dateUpdated = new Date().toISOString();
     await saveData();
   }
   return JSON.parse(JSON.stringify(client));
 }
+
+/**
+ * Sets the complete list of associated group IDs for a client.
+ * @param clientId The ID of the client.
+ * @param groupIds An array of group IDs to associate. Old associations are replaced.
+ */
+export async function setClientAssociatedGroups(clientId: string, groupIds: number[]): Promise<void> {
+    const client = dataStore.clients[clientId];
+    if (!client) {
+        throw new Error(`Client with ID "${clientId}" not found.`);
+    }
+    if (client.status !== 'approved') {
+        throw new Error(`Client "${clientId}" is not approved. Cannot set group associations.`);
+    }
+
+    // Validate all group IDs exist before setting
+    for (const groupId of groupIds) {
+        if (!dataStore.secretGroups[groupId]) {
+            throw new Error(`Secret group with ID "${groupId}" not found.`);
+        }
+    }
+
+    client.associatedGroupIds = [...new Set(groupIds)]; // Ensure unique IDs and copy array
+    client.dateUpdated = new Date().toISOString();
+    await saveData();
+    console.log(`Client ${clientId} associated groups updated to: ${client.associatedGroupIds.join(', ')}`);
+}
+
+/**
+ * Retrieves all unique secret keys a client has access to through their associated groups.
+ * @param clientId The ID of the client.
+ * @returns An array of secret keys.
+ */
+export function getSecretsForClient(clientId: string): string[] {
+    const client = dataStore.clients[clientId];
+    if (!client || !client.associatedGroupIds || client.associatedGroupIds.length === 0) {
+        return [];
+    }
+
+    const accessibleKeys = new Set<string>();
+    for (const groupId of client.associatedGroupIds) {
+        const group = dataStore.secretGroups[groupId];
+        if (group && group.keys) {
+            group.keys.forEach(key => accessibleKeys.add(key));
+        }
+    }
+    return Array.from(accessibleKeys);
+}
+
 
 /**
  * Retrieves an approved client by their authToken.
