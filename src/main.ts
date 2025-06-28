@@ -4,12 +4,14 @@ import { initializeDataManager } from './lib/dataManager';
 import { startHttpServer } from './http/httpServer';
 import { startWebSocketServer } from './websocket/wsServer';
 import dotenv from 'dotenv';
+import { getConfig } from './lib/configManager';
 
-// Load environment variables from .env file
+// Load environment variables from .env file (e.g., for MASTER_PASSWORD)
 dotenv.config();
 
-const HTTP_PORT = parseInt(process.env.HTTP_PORT || '3000', 10);
-const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
+// Configuration will be loaded by configManager and accessed via getConfig()
+// const HTTP_PORT = parseInt(process.env.HTTP_PORT || '3000', 10); // Now from config
+// const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10); // Now from config
 
 // Store servers for graceful shutdown
 let httpServerInstance: ReturnType<typeof startHttpServer> | null = null;
@@ -72,15 +74,17 @@ async function startServer() {
     return;
   }
 
-  console.log(`Attempting to start HTTP server on port ${HTTP_PORT}...`);
-  httpServerInstance = startHttpServer(HTTP_PORT, password);
+  const config = getConfig(); // Load configuration
 
-  console.log(`Attempting to start WebSocket server on port ${WS_PORT}...`);
-  wsServerInstance = startWebSocketServer(WS_PORT);
+  console.log(`Attempting to start HTTP server on port ${config.httpPort}...`);
+  httpServerInstance = startHttpServer(config.httpPort, password);
+
+  console.log(`Attempting to start WebSocket server on port ${config.wsPort}...`);
+  wsServerInstance = startWebSocketServer(config.wsPort);
 
   console.log('Server started successfully.');
-  console.log(`Admin UI accessible via HTTP server (e.g., http://localhost:${HTTP_PORT}/admin)`);
-  console.log(`WebSocket connections on ws://localhost:${WS_PORT}`);
+  console.log(`Admin UI accessible via HTTP server (e.g., http://localhost:${config.httpPort}/admin)`);
+  console.log(`WebSocket connections on ws://localhost:${config.wsPort}`);
 }
 
 function gracefulShutdown(signal: string) {
