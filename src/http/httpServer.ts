@@ -65,23 +65,21 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         } catch (err: any) { // Type err as any to allow accessing err.message
             console.warn('Invalid JWT cookie:', err.message);
             res.clearCookie(ADMIN_COOKIE_NAME, { path: '/admin' }); // Clear bad cookie
-            // Fall through to redirect to login
+            return res.status(401).redirect('/admin/login'); // Redirect immediately
         }
     }
 
-    // 2. Check for Bearer token (for API or manual testing) for all other /admin routes
-    // This is kept for now for existing API/testing workflows.
-    // For a pure cookie-based session UI, this Bearer token check could be removed for UI routes.
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-        const bearerToken = authHeader.substring(7);
-        if (bearerToken === serverAdminPasswordSingleton) {
-            return next();
-        }
-    }
+    // Bearer token functionality removed. Authentication is cookie-based.
+    // const authHeader = req.headers.authorization;
+    // if (authHeader && authHeader.startsWith('Bearer ')) {
+    //     const bearerToken = authHeader.substring(7);
+    //     if (bearerToken === serverAdminPasswordSingleton) {
+    //         return next();
+    //     }
+    // }
 
-    // If here, neither JWT cookie nor valid Bearer token was found for a protected route
-    // Redirect to login page
+    // If here, no valid JWT cookie was found (or an invalid one was cleared),
+    // so redirect to login page.
     return res.status(401).redirect('/admin/login');
   };
 
@@ -133,7 +131,6 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         key,
         value: DataManager.getSecretItem(key) // Updated function name
       }));
-      // Password from query is no longer used for auth; Bearer token is primary.
       // The 'password' variable was passed to EJS for link construction.
       const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
 
