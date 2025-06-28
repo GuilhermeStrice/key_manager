@@ -62,7 +62,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
             jwt.verify(tokenCookie, JWT_SECRET); // Throws error if invalid
             // Optional: req.user = decoded;
             return next(); // Valid JWT cookie, allow access
-        } catch (err) {
+        } catch (err: any) { // Type err as any to allow accessing err.message
             console.warn('Invalid JWT cookie:', err.message);
             res.clearCookie(ADMIN_COOKIE_NAME, { path: '/admin' }); // Clear bad cookie
             // Fall through to redirect to login
