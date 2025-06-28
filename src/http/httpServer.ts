@@ -352,21 +352,37 @@ export async function startHttpServer(port: number, serverAdminPassword?: string
     res.json({ autoApproveEnabled: autoApproveWebSocketRegistrations });
   });
 
-  app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection & async
-    autoApproveWebSocketRegistrations = !autoApproveWebSocketRegistrations;
-    console.log(`WebSocket auto-approval toggled to: ${autoApproveWebSocketRegistrations}`);
+  app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, csrfProtection, async (req, res) => {
+    const { enable } = req.body; // Expecting { "enable": boolean }
+
+    if (typeof enable !== 'boolean') {
+      return res.status(400).json({ message: "Invalid request body. 'enable' boolean field required." });
+    }
+
+    autoApproveWebSocketRegistrations = enable;
+    console.log(`WebSocket auto-approval set in memory to: ${autoApproveWebSocketRegistrations}`);
+
     try {
-        await ConfigManager.saveConfiguration({ autoApproveWebSocketRegistrations });
+        const currentConfig = await ConfigManager.loadConfiguration();
+        currentConfig.autoApproveWebSocketRegistrations = autoApproveWebSocketRegistrations;
+
+        await ConfigManager.saveConfiguration(currentConfig);
+        console.log(`WebSocket auto-approval state (${autoApproveWebSocketRegistrations}) saved to config file.`);
+
         res.json({
-            autoApproveEnabled: autoApproveWebSocketRegistrations,
+            autoApproveEnabled: currentConfig.autoApproveWebSocketRegistrations,
             message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}. State saved.`
         });
     } catch (error) {
         console.error("Error saving auto-approve configuration:", error);
-        // Still update in-memory state and respond, but log the error
+        // Note: The in-memory state was already updated. If save fails, they are now out of sync.
+        // For robustness, one might revert the in-memory change or retry.
+        // For now, client will get an error, and in-memory value remains what user set.
         res.status(500).json({
-            autoApproveEnabled: autoApproveWebSocketRegistrations, // Reflects the toggled state
-            message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}. Error saving state.`,
+            // autoApproveEnabled still reflects the intended (now in-memory) state.
+            // UI should ideally reflect that save failed and current state might not be persisted.
+            autoApproveEnabled: autoApproveWebSocketRegistrations,
+            message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}. ERROR SAVING STATE.`,
             error: "Failed to persist setting."
         });
     }
