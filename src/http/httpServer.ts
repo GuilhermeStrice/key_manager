@@ -32,7 +32,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
   // Simple password protection for all /admin routes
   // TODO: Implement proper session-based authentication for the admin panel
-  const adminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const adminAuth = (req: express.Request, res: express.Response, next: express.NextFunction): any => { // Added : any
     if (!serverAdminPasswordSingleton) {
         console.warn('Admin password not set for HTTP server. Admin routes will be inaccessible.');
         return res.status(500).send('Admin interface not configured.');
@@ -170,7 +170,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
         if (itemToEdit === undefined) {
             // No currentPassword to pass in redirect
-            return res.redirect(`/admin?message=Secret+not+found&messageType=error`);
+            res.redirect(`/admin?message=Secret+not+found&messageType=error`);
+            return;
         }
 
         const allKeys = DataManager.getAllSecretKeys(); // Updated function name
@@ -326,7 +327,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     try {
       const client = DataManager.getClient(clientId);
       if (!client || client.status !== 'approved') {
-        return res.redirect(`/admin/clients?message=Client+not+found+or+not+approved.&messageType=error`);
+        res.redirect(`/admin/clients?message=Client+not+found+or+not+approved.&messageType=error`);
+        return;
       }
       const allSecretKeys = DataManager.getAllSecretKeys();
       const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
@@ -343,7 +345,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         }
       });
     } catch (error: any) {
-      res.redirect(`/admin/clients?password=${encodeURIComponent(currentPassword)}&message=Error+loading+secret+management+for+client:+${encodeURIComponent(error.message)}&messageType=error`);
+      res.redirect(`/admin/clients?message=Error+loading+secret+management+for+client:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 

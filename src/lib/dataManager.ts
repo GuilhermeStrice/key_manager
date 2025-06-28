@@ -78,7 +78,7 @@ async function loadData(): Promise<void> {
     const encryptedData = await fs.readFile(DATA_FILE_PATH, 'utf-8');
     if (encryptedData.trim() === '') {
         console.log('Data file is empty. Initializing with an empty store.');
-        dataStore = {};
+        dataStore = { secrets: {}, clients: {} }; // Ensure it matches SecureDataStore type
         return;
     }
     const decryptedJson = decrypt(encryptedData, masterEncryptionKey);
@@ -238,15 +238,9 @@ export async function addPendingClient(
  * @returns The updated ClientInfo object with the new authToken.
  */
 export async function approveClient(clientId: string): Promise<ClientInfo> {
-  const client = dataStore.clients[clientId];
-  if (!clientId || typeof clientId !== 'string') throw new Error("Client ID must be a non-empty string.");
-  if (!secretKey || typeof secretKey !== 'string') throw new Error("Secret key must be a non-empty string.");
-
+  // Removed duplicated validation and client declaration block
   if (!clientId || typeof clientId !== 'string' || clientId.trim() === "") {
     throw new Error("Client ID must be a non-empty string.");
-  }
-  if (!secretKey || typeof secretKey !== 'string' || secretKey.trim() === "") {
-    throw new Error("Secret key must be a non-empty string.");
   }
 
   const client = dataStore.clients[clientId];
