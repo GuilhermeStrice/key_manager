@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
-const CONFIG_DIR = path.join(__dirname, '../../../data'); // Relative to src/lib, so ../../data
+// Use process.cwd() for a path relative to the project root where the script is executed.
+const CONFIG_DIR = path.join(process.cwd(), 'data');
 const CONFIG_FILE_PATH = path.join(CONFIG_DIR, 'runtime-config.json');
 
 export interface AppConfig {
@@ -89,7 +90,11 @@ export function loadConfig(): AppConfig {
     console.warn('WARNING: Using default JWT secret. This is NOT secure for production. Consider setting a unique JWT_SECRET in data/runtime-config.json.');
   }
 
+  console.log(`[Debug] Final check before saving: needsSave = ${needsSave}`);
+  // console.log(`[Debug] Config to potentially save:`, JSON.stringify(configWithDefaults, null, 2)); // Can be verbose
+
   if (needsSave) {
+    console.log(`[Debug] Attempting to save configuration because needsSave is true.`);
     saveConfig(configWithDefaults);
   }
 
