@@ -44,6 +44,7 @@
         <% if (editingItemKey !== null && itemToEdit !== undefined) { %>
             <h3>Edit Secret: <%= editingItemKey %></h3>
             <form action="/admin/update-secret" method="POST">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <input type="hidden" name="originalKey" value="<%= editingItemKey %>">
                 <div class="form-group">
                     <label for="editSecretKey">Key (leave unchanged if not modifying key name):</label>
@@ -59,6 +60,7 @@
         <% } else { %>
             <h3>Add New Secret</h3>
             <form action="/admin/add-secret" method="POST">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <div class="form-group">
                     <label for="secretKey">Secret Key:</label>
                     <input type="text" id="secretKey" name="secretKey" required>
@@ -95,6 +97,7 @@
                             <td class="actions">
                                 <a href="/admin/edit-secret/<%= encodeURIComponent(secret.key) %>">Edit</a>
                                 <form action="/admin/delete-secret/<%= encodeURIComponent(secret.key) %>" method="POST" style="display:inline;">
+                                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                                     <button type="submit" class="delete">Delete</button>
                                 </form>
                             </td>

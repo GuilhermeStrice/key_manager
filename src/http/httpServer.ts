@@ -4,6 +4,9 @@ import path from 'path';
 import helmet from 'helmet'; // Security headers
 import jwt from 'jsonwebtoken'; // Added for JWT
 import cookieParser from 'cookie-parser'; // Added for cookie parsing
+import session from 'express-session'; // For CSRF
+import csrf from 'csurf'; // For CSRF
+import crypto from 'crypto'; // For generating temporary session secret
 import * as DataManager from '../lib/dataManager'; // Import DataManager functions
 import { notifyClientStatusUpdate } from '../websocket/wsServer'; // Import notification function
 
@@ -45,6 +48,35 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   // Middleware for parsing cookies
   app.use(cookieParser());
 
+  // Session middleware configuration (needed for csurf)
+  // IMPORTANT: Use a strong, unique secret from environment variables in production
+  const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+  if (sessionSecret === crypto.randomBytes(32).toString('hex') && process.env.NODE_ENV !== 'test') { // Crude check if it's a temp secret
+      console.warn('WARNING: Using a temporary session secret. Set SESSION_SECRET in your environment for production.');
+  }
+  app.use(session({
+    secret: sessionSecret,
+    resave: false,
+    saveUninitialized: true, // Typically true for csurf if session is not otherwise established
+    cookie: {
+        secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
+        httpOnly: true, // Helps prevent XSS
+        sameSite: 'lax' // Good default for CSRF protection balance
+    }
+  }));
+
+  // CSRF protection middleware
+  // This should be after session and cookieParser
+  // All non-GET requests to protected routes will need a CSRF token
+  const csrfProtection = csrf({ cookie: false }); // Using session-based storage for CSRF secret
+  // We will apply csrfProtection selectively or globally before routes that need it.
+  // For admin panel, most POST routes will need it. Login POST might be an exception if handled before session.
+  // For now, we will apply it to specific routes that render forms.
+  // Note: The login page itself (GET /admin/login) does not need CSRF protection on its GET request,
+  // as it doesn't contain forms that would be submitted with a CSRF token from *that* page load.
+  // The POST /admin/login is also special as it establishes auth; CSRF is more for actions taken *after* auth.
+  // However, if we decide to protect POST /admin/login, its GET handler would need to provide a token.
+  // For now, focusing on authenticated admin actions.
 
   // Simple password protection for all /admin routes
   // TODO: Implement proper session-based authentication for the admin panel
@@ -129,7 +161,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
 
   // Protected admin route
-  app.get('/admin', adminAuth, async (req, res) => {
+  app.get('/admin', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
     try {
       const allKeys = DataManager.getAllSecretKeys(); // Updated function name
       const secrets = allKeys.map(key => ({
@@ -144,7 +176,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         password: '', // EJS links will be updated to not use this
         message,
         editingItemKey: null,
-        itemToEdit: null
+        itemToEdit: null,
+        csrfToken: req.csrfToken() // Pass CSRF token to template
       });
     } catch (error) {
       console.error("Error rendering admin page:", error);
@@ -153,7 +186,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   });
 
   // Route to show edit form
-  app.get('/admin/edit-secret/:key', adminAuth, async (req, res) => {
+  app.get('/admin/edit-secret/:key', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
     try {
         const itemKey = decodeURIComponent(req.params.key);
         const itemToEdit = DataManager.getSecretItem(itemKey); // Updated function name
@@ -173,7 +206,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
             password: '', // EJS links will be updated
             message: null,
             editingItemKey: itemKey,
-            itemToEdit: itemToEdit
+            itemToEdit: itemToEdit,
+            csrfToken: req.csrfToken() // Pass CSRF token to template
         });
     } catch (error) {
         console.error("Error rendering edit page:", error);
@@ -183,7 +217,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   });
 
   // Handle Add Secret
-  app.post('/admin/add-secret', adminAuth, async (req, res) => {
+  app.post('/admin/add-secret', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
     const { secretKey, secretValue } = req.body;
     // currentPassword from query is removed. Bearer token handles auth.
     let parsedValue = secretValue;
@@ -210,7 +244,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   });
 
   // Handle Update Secret
-  app.post('/admin/update-secret', adminAuth, async (req, res) => {
+  app.post('/admin/update-secret', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
     const { originalKey, secretKey, secretValue } = req.body;
     // currentPassword from query is removed. Bearer token handles auth.
     let parsedValue = secretValue;
@@ -242,7 +276,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   });
 
   // Handle Delete Secret
-  app.post('/admin/delete-secret/:key', adminAuth, async (req, res) => {
+  app.post('/admin/delete-secret/:key', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
     const itemKey = decodeURIComponent(req.params.key);
     // currentPassword from query is removed. Bearer token handles auth.
     try {
@@ -259,7 +293,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     res.json({ autoApproveEnabled: autoApproveWebSocketRegistrations });
   });
 
-  app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, (req, res) => {
+  app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, csrfProtection, (req, res) => { // Added csrfProtection
     autoApproveWebSocketRegistrations = !autoApproveWebSocketRegistrations;
     console.log(`WebSocket auto-approval toggled to: ${autoApproveWebSocketRegistrations}`);
     res.json({
@@ -270,7 +304,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
   // --- Client Management Routes ---
 
-  app.get('/admin/clients', adminAuth, async (req, res) => {
+  // Note: GET routes for clients already have csrfProtection for token generation
+  app.get('/admin/clients', adminAuth, csrfProtection, async (req, res) => {
     try {
       const pendingClients = DataManager.getPendingClients();
       const approvedClients = DataManager.getApprovedClients();
@@ -283,6 +318,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         password: '', // EJS links will be updated
         message,
         managingClientSecrets: null, // Not managing specific client secrets by default
+        csrfToken: req.csrfToken() // Pass CSRF token to template
       });
     } catch (error) {
       console.error("Error rendering clients page:", error);
@@ -290,7 +326,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     }
   });
 
-  app.post('/admin/clients/approve/:clientId', adminAuth, async (req, res) => {
+  app.post('/admin/clients/approve/:clientId', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
     const { clientId } = req.params;
     // currentPassword from query is removed.
     try {
@@ -303,7 +339,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     }
   });
 
-  app.post('/admin/clients/reject/:clientId', adminAuth, async (req, res) => {
+  app.post('/admin/clients/reject/:clientId', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
     const { clientId } = req.params;
     // currentPassword from query is removed.
     try {
@@ -315,7 +351,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     }
   });
 
-  app.post('/admin/clients/revoke/:clientId', adminAuth, async (req, res) => {
+  app.post('/admin/clients/revoke/:clientId', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
     const { clientId } = req.params;
     // currentPassword from query is removed.
     try {
@@ -327,7 +363,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     }
   });
 
-  app.get('/admin/clients/:clientId/secrets', adminAuth, async (req, res) => {
+  app.get('/admin/clients/:clientId/secrets', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection
     const { clientId } = req.params;
     // currentPassword from query is removed.
     try {
@@ -348,14 +384,15 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         managingClientSecrets: {
           client: client,
           allSecrets: allSecretKeys
-        }
+        },
+        csrfToken: req.csrfToken() // Pass CSRF token to template
       });
     } catch (error: any) {
       res.redirect(`/admin/clients?message=Error+loading+secret+management+for+client:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
-  app.post('/admin/clients/:clientId/secrets/update', adminAuth, async (req, res) => {
+  app.post('/admin/clients/:clientId/secrets/update', adminAuth, csrfProtection, async (req, res) => { // Added csrfProtection to POST route
     const { clientId } = req.params;
     let { associatedSecretKeys } = req.body; // This will be an array or single string if only one selected
     // currentPassword from query is removed.
@@ -442,6 +479,26 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         console.log("Admin panel access requires the server startup password.");
     }
   });
+
+  // CSRF Error Handler
+  // This must be defined as an error-handling middleware (with 4 arguments)
+  // and should be placed after all other middleware and routes.
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err.code === 'EBADCSRFTOKEN') {
+      console.warn(`CSRF token validation failed for request: ${req.method} ${req.path}`);
+      // Send a user-friendly error page or a simple 403 response
+      res.status(403).send('Invalid CSRF token. Please refresh the page and try again, or ensure cookies are enabled.');
+    } else {
+      // If it's not a CSRF error, pass it to the next error handler (if any)
+      // or let Express handle it as a generic server error.
+      console.error("Unhandled error:", err); // Log other errors for debugging
+      next(err);
+    }
+  });
+
+  // It's important that the CSRF error handler is added before any generic
+  // error handler that might catch all errors and send a 500 response without
+  // checking the error type. If no other generic error handler exists, this is fine.
 
   return server; // Return the Node.js HTTP server instance
 }

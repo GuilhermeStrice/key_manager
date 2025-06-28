@@ -57,6 +57,7 @@
         <% if (managingClientSecrets) { %>
             <h2>Manage Secrets for Client: <span class="mono"><%= managingClientSecrets.client.name %> (<%= managingClientSecrets.client.id %>)</span></h2>
             <form action="/admin/clients/<%= managingClientSecrets.client.id %>/secrets/update" method="POST">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <div class="form-group">
                     <label>Available Secrets (select to associate):</label>
                     <% if (managingClientSecrets.allSecrets.length > 0) { %>
@@ -99,9 +100,11 @@
                                 <td><%= new Date(client.dateCreated).toLocaleString() %></td>
                                 <td class="actions">
                                     <form action="/admin/clients/approve/<%= client.id %>" method="POST" style="display:inline;">
+                                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                                         <button type="submit" class="approve">Approve</button>
                                     </form>
                                     <form action="/admin/clients/reject/<%= client.id %>" method="POST" style="display:inline;">
+                                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                                         <button type="submit" class="reject">Reject</button>
                                     </form>
                                 </td>
@@ -135,6 +138,7 @@
                                 <td class="actions">
                                     <a href="/admin/clients/<%= client.id %>/secrets">Manage Secrets</a>
                                     <form action="/admin/clients/revoke/<%= client.id %>" method="POST" style="display:inline;">
+                                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                                         <button type="submit" class="delete">Revoke</button>
                                     </form>
                                 </td>
@@ -149,6 +153,12 @@
     </div>
 
     <script>
+        // Make CSRF token available to client-side JavaScript
+        // This script block should be within the body, ideally after the main content,
+        // or ensure csrfToken is defined if it's in the head.
+        // Given it's at the end of the body, this is fine.
+        const csrfToken = "<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>";
+
         document.addEventListener('DOMContentLoaded', () => {
             const autoApproveToggle = document.getElementById('autoApproveWsToggle');
             const autoApproveStatusSpan = document.getElementById('autoApproveStatus');
@@ -171,12 +181,19 @@
                     autoApproveStatusSpan.textContent = 'Updating...';
                     fetch('/admin/settings/toggle-auto-approve-ws', {
                         method: 'POST',
-                        // body: JSON.stringify({}), // No body needed for a simple toggle
                         headers: {
-                            'Content-Type': 'application/json' // Though no body, header might be expected by some frameworks
+                            'Content-Type': 'application/json',
+                            'CSRF-Token': csrfToken // Add CSRF token to headers
                         }
+                        // No body needed for this specific toggle POST request
                     })
-                    .then(response => response.json())
+                    .then(response => {
+                        if (!response.ok) {
+                            // Handle HTTP errors like 403 Forbidden if CSRF fails server-side
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
                     .then(data => {
                         autoApproveToggle.checked = data.autoApproveEnabled;
                         autoApproveStatusSpan.textContent = data.autoApproveEnabled ? 'Enabled' : 'Disabled';
