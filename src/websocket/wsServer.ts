@@ -1,5 +1,5 @@
 // WebSocket server logic
-import WebSocket, { WebSocketServer } from 'ws'; // Import WebSocketServer as well
+import WebSocket from 'ws';
 import * as DataManager from '../lib/dataManager';
 
 // Extend WebSocket instance type to hold authentication state
@@ -8,31 +8,14 @@ interface AuthenticatedWebSocket extends WebSocket {
   clientInfo?: DataManager.ClientInfo;
 }
 
-// WebSocket Message Type Integer Codes
-// Client-to-Server:
-// 1: REGISTER_CLIENT
-// 2: AUTHENTICATE
-// 3: REQUEST_SECRET
-// 4: LIST_AUTHORIZED_SECRETS
-//
-// Server-to-Client:
-// 100: WELCOME
-// 101: REGISTRATION_PENDING
-// 102: AUTHENTICATED
-// 103: AUTH_FAILED
-// 104: SECRET_RESPONSE
-// 105: UNAUTHORIZED_SECRET_ACCESS
-// 106: AUTHORIZED_SECRETS_LIST
-// 200: ERROR
-
 export function startWebSocketServer(port: number) {
-  const wss = new WebSocketServer({ port }); // Use WebSocketServer for server creation
+  const wss = new WebSocket.Server({ port });
 
   wss.on('connection', (ws: AuthenticatedWebSocket) => {
     console.log('Client connected to WebSocket server');
     ws.isAuthenticated = false;
 
-    ws.on('message', async (messageData: WebSocket.RawData, isBinary: boolean) => { // Add types for messageData and isBinary
+    ws.on('message', async (messageData) => {
       let parsedMessage;
       try {
         // Ensure messageData is a string before parsing
@@ -41,24 +24,22 @@ export function startWebSocketServer(port: number) {
         console.log('Received from client:', parsedMessage);
       } catch (error) {
         console.error('Failed to parse message or message not JSON:', messageData.toString());
-        ws.send(JSON.stringify({ type: 200, payload: { message: "Invalid message format. Expected JSON." } })); // ERROR code
+        ws.send(JSON.stringify({ type: "ERROR", payload: { message: "Invalid message format. Expected JSON." } }));
         return;
       }
 
-      const { type, payload } = parsedMessage; // type is now expected to be an integer
+      const { type, payload } = parsedMessage;
 
       switch (type) {
-        case 1: // REGISTER_CLIENT
-          console.log('[WebSocket] Attempting to register client (type 1). Payload:', payload);
+        case 'REGISTER_CLIENT':
           try {
             if (!payload || !payload.clientName) {
               throw new Error("clientName is required for registration.");
             }
             // Add to DataManager as pending
             const newClient = await DataManager.addPendingClient(payload.clientName, payload.requestedSecretKeys);
-            console.log('[WebSocket] Client registration pending in DataManager. Client Temp ID:', newClient.temporaryId);
             ws.send(JSON.stringify({
-              type: 101, // REGISTRATION_PENDING
+              type: "REGISTRATION_PENDING",
               payload: {
                 clientId: newClient.id, // This is the server-side ID for admin tracking
                 temporaryId: newClient.temporaryId, // Client should hold onto this if needed for status checks (not implemented yet)
@@ -66,12 +47,11 @@ export function startWebSocketServer(port: number) {
               }
             }));
           } catch (error: any) {
-            console.error('[WebSocket] Error during client registration:', error);
-            ws.send(JSON.stringify({ type: 200, payload: { message: `Registration failed: ${error.message}` } })); // ERROR code
+            ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Registration failed: ${error.message}` } }));
           }
           break;
 
-        case 2: // AUTHENTICATE
+        case 'AUTHENTICATE':
           try {
             if (!payload || !payload.authToken) {
                 throw new Error("authToken is required for authentication.");
@@ -81,7 +61,7 @@ export function startWebSocketServer(port: number) {
               ws.isAuthenticated = true;
               ws.clientInfo = clientInfo;
               ws.send(JSON.stringify({
-                type: 102, // AUTHENTICATED
+                type: "AUTHENTICATED",
                 payload: {
                   message: `Client "${clientInfo.name}" authenticated successfully.`,
                   clientId: clientInfo.id,
@@ -93,24 +73,25 @@ export function startWebSocketServer(port: number) {
             } else {
               ws.isAuthenticated = false;
               ws.clientInfo = undefined;
-              ws.send(JSON.stringify({ type: 103, payload: { message: "Authentication failed: Invalid or unapproved token." } })); // AUTH_FAILED
+              ws.send(JSON.stringify({ type: "AUTH_FAILED", payload: { message: "Authentication failed: Invalid or unapproved token." } }));
               console.log(`Authentication failed for token: ${payload.authToken}`);
             }
           } catch (error: any) {
-            ws.send(JSON.stringify({ type: 200, payload: { message: `Authentication error: ${error.message}` } })); // ERROR code
+            ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Authentication error: ${error.message}` } }));
           }
           break;
 
-        // Default case for main switch handles unauthenticated access for other types
+        // Placeholder for other message types (e.g., REQUEST_SECRET) - will be handled in next step
+        // For now, if not authenticated, reject other types.
         default:
           if (!ws.isAuthenticated || !ws.clientInfo) {
-            ws.send(JSON.stringify({ type: 200, payload: { message: "Client not authenticated. Please register or authenticate before sending other commands." } })); // ERROR code
-            return;
+            ws.send(JSON.stringify({ type: "ERROR", payload: { message: "Client not authenticated. Please register or authenticate before sending other commands." } }));
+            return; // Important to return to prevent further processing for unauthenticated users
           }
 
-          // Handle messages for authenticated clients (nested switch)
+          // Handle messages for authenticated clients
           switch(type) {
-            case 3: // REQUEST_SECRET
+            case 'REQUEST_SECRET':
               try {
                 if (!payload || !payload.secretKey) {
                   throw new Error("secretKey is required for REQUEST_SECRET.");
@@ -120,41 +101,42 @@ export function startWebSocketServer(port: number) {
                   const secretValue = DataManager.getSecretItem(secretKey);
                   if (secretValue !== undefined) {
                     ws.send(JSON.stringify({
-                      type: 104, // SECRET_RESPONSE
+                      type: "SECRET_RESPONSE",
                       payload: { secretKey, value: secretValue }
                     }));
                   } else {
+                    // Should not happen if associatedSecretKeys is in sync with actual secrets
                     console.error(`Client ${ws.clientInfo.name} authorized for non-existent secret ${secretKey}`);
-                    ws.send(JSON.stringify({ type: 200, payload: { message: `Secret key "${secretKey}" not found on server, though authorized.` } })); // ERROR code
+                    ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Secret key "${secretKey}" not found on server, though authorized.` } }));
                   }
                 } else {
                   ws.send(JSON.stringify({
-                    type: 105, // UNAUTHORIZED_SECRET_ACCESS
+                    type: "UNAUTHORIZED_SECRET_ACCESS",
                     payload: { secretKey, message: "You are not authorized to access this secret." }
                   }));
                 }
               } catch (error: any) {
-                ws.send(JSON.stringify({ type: 200, payload: { message: `Error requesting secret: ${error.message}` } })); // ERROR code
+                ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Error requesting secret: ${error.message}` } }));
               }
               break;
 
-            case 4: // LIST_AUTHORIZED_SECRETS
+            case 'LIST_AUTHORIZED_SECRETS':
               try {
                 ws.send(JSON.stringify({
-                  type: 106, // AUTHORIZED_SECRETS_LIST
+                  type: "AUTHORIZED_SECRETS_LIST",
                   payload: { authorizedSecretKeys: ws.clientInfo.associatedSecretKeys }
                 }));
               } catch (error: any) {
-                 ws.send(JSON.stringify({ type: 200, payload: { message: `Error listing authorized secrets: ${error.message}` } })); // ERROR code
+                 ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Error listing authorized secrets: ${error.message}` } }));
               }
               break;
 
-            default: // Handles unknown types for authenticated clients
-              console.log(`Authenticated client ${ws.clientInfo?.name} sent unhandled message type code: ${type}`);
-              ws.send(JSON.stringify({ type: 200, payload: { message: `Unknown message type code: ${type}` } })); // ERROR code
+            default:
+              console.log(`Authenticated client ${ws.clientInfo?.name} sent unhandled message type: ${type}`);
+              ws.send(JSON.stringify({ type: "ERROR", payload: { message: `Unknown message type: ${type}` } }));
               break;
           }
-          break; // Break for the outer switch's default case
+          break;
       }
     });
 
@@ -162,11 +144,11 @@ export function startWebSocketServer(port: number) {
       console.log(`Client ${ws.clientInfo ? ws.clientInfo.name + ' (' + ws.clientInfo.id + ')' : 'Unknown'} disconnected from WebSocket server`);
     });
 
-    ws.on('error', (error: Error) => { // Add Error type for error
+    ws.on('error', (error) => {
       console.error(`WebSocket error for client ${ws.clientInfo ? ws.clientInfo.name : 'Unknown'}:`, error);
     });
 
-    ws.send(JSON.stringify({ type: 100, payload: { message: "Welcome to the WebSocket server! Please register or authenticate." } })); // WELCOME code
+    ws.send(JSON.stringify({ type: "WELCOME", payload: { message: "Welcome to the WebSocket server! Please register or authenticate." } }));
   });
 
   console.log(`WebSocket server started on ws://localhost:${port}`);

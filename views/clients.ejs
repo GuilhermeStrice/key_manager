@@ -32,9 +32,9 @@
     <div class="container">
         <h1>Client Application Management</h1>
         <div class="nav-links">
-            <a href="/admin?password=<%= encodeURIComponent(password) %>">Manage Secrets</a>
-            <a href="/admin/clients?password=<%= encodeURIComponent(password) %>">Manage Clients</a>
-            <a href="/admin/logout?password=<%= encodeURIComponent(password) %>" style="float: right;">Logout</a>
+            <a href="/admin">Manage Secrets</a>
+            <a href="/admin/clients">Manage Clients</a>
+            <a href="/admin/logout" style="float: right;">Logout</a>
         </div>
 
         <% if (message && message.text) { %>
@@ -45,7 +45,7 @@
 
         <% if (managingClientSecrets) { %>
             <h2>Manage Secrets for Client: <span class="mono"><%= managingClientSecrets.client.name %> (<%= managingClientSecrets.client.id %>)</span></h2>
-            <form action="/admin/clients/<%= managingClientSecrets.client.id %>/secrets/update?password=<%= encodeURIComponent(password) %>" method="POST">
+            <form action="/admin/clients/<%= managingClientSecrets.client.id %>/secrets/update" method="POST">
                 <div class="form-group">
                     <label>Available Secrets (select to associate):</label>
                     <% if (managingClientSecrets.allSecrets.length > 0) { %>
@@ -64,7 +64,7 @@
                     <% } %>
                 </div>
                 <button type="submit" class="btn">Update Associated Secrets</button>
-                <a href="/admin/clients?password=<%= encodeURIComponent(password) %>" class="btn btn-secondary">Back to Client List</a>
+                <a href="/admin/clients" class="btn btn-secondary">Back to Client List</a>
             </form>
         <% } else { %>
             <h2>Pending Client Registrations</h2>
@@ -87,11 +87,11 @@
                                 <td><%= client.requestedSecretKeys && client.requestedSecretKeys.length > 0 ? client.requestedSecretKeys.join(', ') : 'None' %></td>
                                 <td><%= new Date(client.dateCreated).toLocaleString() %></td>
                                 <td class="actions">
-                                    <form action="/admin/clients/approve/<%= client.id %>?password=<%= encodeURIComponent(password) %>" method="POST" style="display:inline;">
+                                    <form action="/admin/clients/approve/<%= client.id %>" method="POST" style="display:inline;">
                                         <button type="submit" class="approve">Approve</button>
                                     </form>
-                                    <form action="/admin/clients/reject/<%= client.id %>?password=<%= encodeURIComponent(password) %>" method="POST" style="display:inline;">
-                                        <button type="submit" class="reject" onclick="return confirm('Are you sure you want to reject this client?');">Reject</button>
+                                    <form action="/admin/clients/reject/<%= client.id %>" method="POST" style="display:inline;">
+                                        <button type="submit" class="reject">Reject</button>
                                     </form>
                                 </td>
                             </tr>
@@ -124,9 +124,9 @@
                                 <td><%= client.associatedSecretKeys.join(', ') || 'None' %></td>
                                 <td><%= new Date(client.dateUpdated).toLocaleString() %></td>
                                 <td class="actions">
-                                    <a href="/admin/clients/<%= client.id %>/secrets?password=<%= encodeURIComponent(password) %>">Manage Secrets</a>
-                                    <form action="/admin/clients/revoke/<%= client.id %>?password=<%= encodeURIComponent(password) %>" method="POST" style="display:inline;">
-                                        <button type="submit" class="delete" onclick="return confirm('Are you sure you want to revoke this client? This will delete the client and its token.');">Revoke</button>
+                                    <a href="/admin/clients/<%= client.id %>/secrets">Manage Secrets</a>
+                                    <form action="/admin/clients/revoke/<%= client.id %>" method="POST" style="display:inline;">
+                                        <button type="submit" class="delete">Revoke</button>
                                     </form>
                                 </td>
                             </tr>

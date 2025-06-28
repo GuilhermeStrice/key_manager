@@ -32,7 +32,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
   // Simple password protection for all /admin routes
   // TODO: Implement proper session-based authentication for the admin panel
-  const adminAuth = (req: express.Request, res: express.Response, next: express.NextFunction): any => {
+  const adminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (!serverAdminPasswordSingleton) {
         console.warn('Admin password not set for HTTP server. Admin routes will be inaccessible.');
         return res.status(500).send('Admin interface not configured.');
@@ -46,11 +46,8 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         }
     }
 
-    // For initial access or if not using Bearer token, check query param (less secure, for simplicity)
-    // Or provide a login form.
-    if (req.query.password === serverAdminPasswordSingleton) {
-      return next();
-    }
+    // Query parameter for password is no longer supported for general auth.
+    // Login form POST is the primary way for browsers without Bearer token capability.
 
     // Simple login page
     if (req.path === '/admin/login' && req.method === 'GET') {
@@ -75,7 +72,15 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
             // as a query param or bearer token for all admin actions after this.
             // Let's stick to the Bearer token / query param for subsequent requests.
             // This login form is more for show until proper sessions are built.
-            return res.send("<p>Logged in (conceptually). Please use the password as a 'password' query parameter or 'Authorization: Bearer your_password' header for other admin routes.</p><a href='/admin?password="+encodeURIComponent(req.body.password)+"'>Proceed to Admin</a>");
+            // IMPORTANT: Since query param password is removed, user MUST use Bearer token for subsequent requests.
+            // Or we implement actual sessions.
+            return res.send(`
+                <p>Login Succeeded (conceptually).</p>
+                <p>For subsequent admin actions, you must use the 'Authorization: Bearer YOUR_SERVER_PASSWORD' header.</p>
+                <p>You can use browser developer tools or extensions like ModHeader to set this header for this session.</p>
+                <p><a href="/admin">Proceed to Admin (requires Bearer token to be set)</a></p>
+                <p><a href="/admin/login">Back to Login</a></p>
+            `);
         } else {
             return res.status(401).send('<h1>Admin Login</h1><p>Incorrect password.</p><form action="/admin/login" method="POST"><label for="password">Password:</label><input type="password" id="password" name="password" required><button type="submit">Login</button></form>');
         }
@@ -112,8 +117,19 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
      if (req.body.password && req.body.password === serverAdminPasswordSingleton) {
         // In a real app: set a signed cookie for session management.
         // For now, just acknowledge. User will need to supply password for other routes.
-        // Redirecting to /admin with password in query for demo purposes.
-        res.redirect(`/admin?password=${encodeURIComponent(req.body.password)}`);
+        // Redirecting to /admin. User must use Bearer token.
+        // Consider sending a page that instructs on Bearer token usage instead of an immediate redirect,
+        // or rely on the adminAuth's POST handler message.
+        // For simplicity, let's redirect and assume Bearer token will be used, or rely on adminAuth's message.
+        // A better user experience would be to show the same message as adminAuth's POST handler.
+        // Let's align it with the message from adminAuth.
+         res.send(`
+            <p>Login Succeeded.</p>
+            <p>For subsequent admin actions, you must use the 'Authorization: Bearer YOUR_SERVER_PASSWORD' header.</p>
+            <p>You can use browser developer tools or extensions like ModHeader to set this header for this session.</p>
+            <p><a href="/admin">Proceed to Admin (requires Bearer token to be set)</a></p>
+            <p><a href="/admin/login">Back to Login</a></p>
+        `);
     } else {
         res.status(401).send('Login failed. <a href="/admin/login">Try again</a>');
     }
@@ -121,38 +137,28 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
 
   // Protected admin route
-  app.get('/admin', adminAuth, (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    (async () => {
-      try {
-        const allKeys = DataManager.getAllSecretKeys(); // Updated function name
-        const secrets = allKeys.map(key => ({
-          key: key,
-          value: DataManager.getSecretItem(key)
-        }));
-        const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
-        const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
+  app.get('/admin', adminAuth, async (req, res) => {
+    try {
+      const allKeys = DataManager.getAllSecretKeys(); // Updated function name
+      const secrets = allKeys.map(key => ({
+        key,
+        value: DataManager.getSecretItem(key) // Updated function name
+      }));
+      // Password from query is no longer used for auth; Bearer token is primary.
+      // The 'password' variable was passed to EJS for link construction.
+      const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
 
-        res.render('admin', {
-          secrets,
-          password: currentPassword,
-          message,
-          editingItemKey: null,
-          itemToEdit: null
-        });
-      } catch (error) {
-        console.error("Error rendering admin page:", error);
-        if (!res.headersSent) {
-          res.status(500).send("Error loading admin page.");
-        }
-      }
-    })().catch(err => {
-      console.error("Unhandled error in /admin route:", err);
-      if (!res.headersSent) {
-        res.status(500).send("An unexpected error occurred.");
-      }
-      // Optionally call next(err) if you have specific error handling middleware
-      // next(err);
-    });
+      res.render('admin', {
+        secrets,
+        password: '', // EJS links will be updated to not use this
+        message,
+        editingItemKey: null,
+        itemToEdit: null
+      });
+    } catch (error) {
+      console.error("Error rendering admin page:", error);
+      res.status(500).send("Error loading admin page.");
+    }
   });
 
   // Route to show edit form
@@ -160,10 +166,11 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     try {
         const itemKey = decodeURIComponent(req.params.key);
         const itemToEdit = DataManager.getSecretItem(itemKey); // Updated function name
-        const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
+        // Password from query is no longer used. Auth is via Bearer token.
 
         if (itemToEdit === undefined) {
-            return res.redirect(`/admin?password=${encodeURIComponent(currentPassword)}&message=Secret+not+found&messageType=error`);
+            // No currentPassword to pass in redirect
+            return res.redirect(`/admin?message=Secret+not+found&messageType=error`);
         }
 
         const allKeys = DataManager.getAllSecretKeys(); // Updated function name
@@ -171,22 +178,22 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
         res.render('admin', {
             secrets,
-            password: currentPassword,
+            password: '', // EJS links will be updated
             message: null,
             editingItemKey: itemKey,
             itemToEdit: itemToEdit
         });
     } catch (error) {
         console.error("Error rendering edit page:", error);
-        const currentPassword = req.query.password?.toString() || '';
-        res.redirect(`/admin?password=${encodeURIComponent(currentPassword)}&message=Error+loading+edit+page&messageType=error`);
+        // No currentPassword to pass in redirect
+        res.redirect(`/admin?message=Error+loading+edit+page&messageType=error`);
     }
   });
 
   // Handle Add Secret
   app.post('/admin/add-secret', adminAuth, async (req, res) => {
     const { secretKey, secretValue } = req.body;
-    const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
+    // currentPassword from query is removed. Bearer token handles auth.
     let parsedValue = secretValue;
     try {
         const trimmedValue = secretValue.trim();
@@ -203,17 +210,17 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         throw new Error('Secret key already exists. Use edit to modify.');
       }
       await DataManager.setSecretItem(secretKey, parsedValue); // Updated function name
-      res.redirect(`/admin?password=${encodeURIComponent(currentPassword)}&message=Secret+added&messageType=success`);
+      res.redirect(`/admin?message=Secret+added&messageType=success`);
     } catch (error: any) {
       console.error("Error adding secret:", error);
-      res.redirect(`/admin?password=${encodeURIComponent(currentPassword)}&message=Error+adding+secret:+${encodeURIComponent(error.message)}&messageType=error`);
+      res.redirect(`/admin?message=Error+adding+secret:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
   // Handle Update Secret
   app.post('/admin/update-secret', adminAuth, async (req, res) => {
     const { originalKey, secretKey, secretValue } = req.body;
-    const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
+    // currentPassword from query is removed. Bearer token handles auth.
     let parsedValue = secretValue;
     try {
         const trimmedValue = secretValue.trim();
@@ -235,23 +242,23 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         } else {
             await DataManager.setSecretItem(originalKey, parsedValue); // Corrected: setSecretItem
         }
-        res.redirect(`/admin?password=${encodeURIComponent(currentPassword)}&message=Secret+updated&messageType=success`);
+        res.redirect(`/admin?message=Secret+updated&messageType=success`);
     } catch (error: any) {
         console.error("Error updating secret:", error);
-        res.redirect(`/admin/edit-secret/${encodeURIComponent(originalKey)}?password=${encodeURIComponent(currentPassword)}&message=Error+updating+secret:+${encodeURIComponent(error.message)}&messageType=error`);
+        res.redirect(`/admin/edit-secret/${encodeURIComponent(originalKey)}?message=Error+updating+secret:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
   // Handle Delete Secret
   app.post('/admin/delete-secret/:key', adminAuth, async (req, res) => {
     const itemKey = decodeURIComponent(req.params.key);
-    const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
+    // currentPassword from query is removed. Bearer token handles auth.
     try {
       await DataManager.deleteSecretItem(itemKey); // Corrected: deleteSecretItem
-      res.redirect(`/admin?password=${encodeURIComponent(currentPassword)}&message=Secret+deleted&messageType=success`);
+      res.redirect(`/admin?message=Secret+deleted&messageType=success`);
     } catch (error: any) {
       console.error("Error deleting secret:", error);
-      res.redirect(`/admin?password=${encodeURIComponent(currentPassword)}&message=Error+deleting+secret:+${encodeURIComponent(error.message)}&messageType=error`);
+      res.redirect(`/admin?message=Error+deleting+secret:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
@@ -261,13 +268,13 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     try {
       const pendingClients = DataManager.getPendingClients();
       const approvedClients = DataManager.getApprovedClients();
-      const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
+      // currentPassword from query is removed.
       const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
 
       res.render('clients', {
         pendingClients,
         approvedClients,
-        password: currentPassword,
+        password: '', // EJS links will be updated
         message,
         managingClientSecrets: null, // Not managing specific client secrets by default
       });
@@ -279,47 +286,47 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
   app.post('/admin/clients/approve/:clientId', adminAuth, async (req, res) => {
     const { clientId } = req.params;
-    const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
+    // currentPassword from query is removed.
     try {
       const client = await DataManager.approveClient(clientId);
       // For security, the authToken should ideally be shown only once, or there should be a separate mechanism to retrieve it.
       // Passing it in the message for now for dev purposes.
-      res.redirect(`/admin/clients?password=${encodeURIComponent(currentPassword)}&message=Client+${client.name}+approved.+Token:+${client.authToken}&messageType=success`);
+      res.redirect(`/admin/clients?message=Client+${client.name}+approved.+Token:+${client.authToken}&messageType=success`);
     } catch (error: any) {
-      res.redirect(`/admin/clients?password=${encodeURIComponent(currentPassword)}&message=Error+approving+client:+${encodeURIComponent(error.message)}&messageType=error`);
+      res.redirect(`/admin/clients?message=Error+approving+client:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
   app.post('/admin/clients/reject/:clientId', adminAuth, async (req, res) => {
     const { clientId } = req.params;
-    const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
+    // currentPassword from query is removed.
     try {
       const client = await DataManager.rejectClient(clientId);
-      res.redirect(`/admin/clients?password=${encodeURIComponent(currentPassword)}&message=Client+${client.name}+rejected.&messageType=success`);
+      res.redirect(`/admin/clients?message=Client+${client.name}+rejected.&messageType=success`);
     } catch (error: any) {
-      res.redirect(`/admin/clients?password=${encodeURIComponent(currentPassword)}&message=Error+rejecting+client:+${encodeURIComponent(error.message)}&messageType=error`);
+      res.redirect(`/admin/clients?message=Error+rejecting+client:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
   app.post('/admin/clients/revoke/:clientId', adminAuth, async (req, res) => {
     const { clientId } = req.params;
-    const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
+    // currentPassword from query is removed.
     try {
       // Revoking means deleting the client in this implementation
       await DataManager.deleteClient(clientId);
-      res.redirect(`/admin/clients?password=${encodeURIComponent(currentPassword)}&message=Client+${clientId}+revoked+(deleted).&messageType=success`);
+      res.redirect(`/admin/clients?message=Client+${clientId}+revoked+(deleted).&messageType=success`);
     } catch (error: any) {
-      res.redirect(`/admin/clients?password=${encodeURIComponent(currentPassword)}&message=Error+revoking+client:+${encodeURIComponent(error.message)}&messageType=error`);
+      res.redirect(`/admin/clients?message=Error+revoking+client:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
   app.get('/admin/clients/:clientId/secrets', adminAuth, async (req, res) => {
     const { clientId } = req.params;
-    const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
+    // currentPassword from query is removed.
     try {
       const client = DataManager.getClient(clientId);
       if (!client || client.status !== 'approved') {
-        return res.redirect(`/admin/clients?password=${encodeURIComponent(currentPassword)}&message=Client+not+found+or+not+approved.&messageType=error`);
+        return res.redirect(`/admin/clients?message=Client+not+found+or+not+approved.&messageType=error`);
       }
       const allSecretKeys = DataManager.getAllSecretKeys();
       const message = req.query.message ? { text: req.query.message.toString(), type: req.query.messageType?.toString() || 'info' } : null;
@@ -328,7 +335,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
       res.render('clients', {
         pendingClients: [], // Not needed for this view part
         approvedClients: [], // Not needed for this view part
-        password: currentPassword,
+        password: '', // EJS links will be updated
         message,
         managingClientSecrets: {
           client: client,
@@ -343,7 +350,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   app.post('/admin/clients/:clientId/secrets/update', adminAuth, async (req, res) => {
     const { clientId } = req.params;
     let { associatedSecretKeys } = req.body; // This will be an array or single string if only one selected
-    const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
+    // currentPassword from query is removed.
 
     if (!Array.isArray(associatedSecretKeys)) {
         associatedSecretKeys = associatedSecretKeys ? [associatedSecretKeys] : [];
@@ -402,16 +409,16 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
         await DataManager.dissociateSecretFromClient(clientId, key);
       }
 
-      res.redirect(`/admin/clients/${clientId}/secrets?password=${encodeURIComponent(currentPassword)}&message=Client+secret+associations+updated.&messageType=success`);
+      res.redirect(`/admin/clients/${clientId}/secrets?message=Client+secret+associations+updated.&messageType=success`);
     } catch (error: any) {
-      res.redirect(`/admin/clients/${clientId}/secrets?password=${encodeURIComponent(currentPassword)}&message=Error+updating+associations:+${encodeURIComponent(error.message)}&messageType=error`);
+      res.redirect(`/admin/clients/${clientId}/secrets?message=Error+updating+associations:+${encodeURIComponent(error.message)}&messageType=error`);
     }
   });
 
 
   app.get('/admin/logout', adminAuth, (req, res) => {
-    const currentPassword = req.query.password?.toString() || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : '');
-    res.send(`Logged out (conceptually). <a href="/admin/login?password=${encodeURIComponent(currentPassword)}">Login again</a>`);
+    // currentPassword from query is removed.
+    res.send(`Logged out (conceptually). <a href="/admin/login">Login again</a>`);
   });
 
   // Placeholder for other non-admin routes or a root welcome
