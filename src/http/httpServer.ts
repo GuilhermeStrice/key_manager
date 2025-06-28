@@ -352,11 +352,12 @@ export async function startHttpServer(port: number, serverAdminPassword?: string
     res.json({ autoApproveEnabled: autoApproveWebSocketRegistrations });
   });
 
-  app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, csrfProtection, async (req, res) => {
+  app.post('/admin/settings/toggle-auto-approve-ws', adminAuth, csrfProtection, async (req, res): Promise<void> => {
     const { enable } = req.body; // Expecting { "enable": boolean }
 
     if (typeof enable !== 'boolean') {
-      return res.status(400).json({ message: "Invalid request body. 'enable' boolean field required." });
+      res.status(400).json({ message: "Invalid request body. 'enable' boolean field required." });
+      return;
     }
 
     autoApproveWebSocketRegistrations = enable;
@@ -373,6 +374,7 @@ export async function startHttpServer(port: number, serverAdminPassword?: string
             autoApproveEnabled: currentConfig.autoApproveWebSocketRegistrations,
             message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}. State saved.`
         });
+        return;
     } catch (error) {
         console.error("Error saving auto-approve configuration:", error);
         // Note: The in-memory state was already updated. If save fails, they are now out of sync.
@@ -385,6 +387,7 @@ export async function startHttpServer(port: number, serverAdminPassword?: string
             message: `WebSocket auto-approval ${autoApproveWebSocketRegistrations ? 'enabled' : 'disabled'}. ERROR SAVING STATE.`,
             error: "Failed to persist setting."
         });
+        return;
     }
   });
 

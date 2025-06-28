@@ -9,11 +9,16 @@ const CONFIG_FILE_PATH = path.join(DATA_DIR, CONFIG_FILE_NAME);
 export interface RuntimeConfig {
   autoApproveWebSocketRegistrations: boolean;
   jwtSecret: string;
+  httpPort?: number;
+  wsPort?: number;
 }
 
 const defaultConfig: RuntimeConfig = {
   autoApproveWebSocketRegistrations: false,
   jwtSecret: 'PLEASE_SET_A_STRONG_JWT_SECRET', // Placeholder, ensure proper handling if used
+  // httpPort and wsPort are optional and will be undefined here
+  // Their defaults will be handled in main.ts or by environment variables
+  // if not specified in the config file.
 };
 
 /**
@@ -52,12 +57,25 @@ export async function loadConfiguration(): Promise<RuntimeConfig> {
         configChanged = true;
     }
 
+    // Optional: Validate httpPort and wsPort if they exist, or remove them if invalid
+    // For now, we'll let them be undefined if not present or if they are not numbers.
+    // The main.ts will handle default values if these are undefined.
+    if (config.httpPort !== undefined && typeof config.httpPort !== 'number') {
+        console.warn(`Invalid 'httpPort' in ${CONFIG_FILE_PATH}. It should be a number. Ignoring value.`);
+        delete config.httpPort; // Or set to a default, but main.ts handles defaults
+        configChanged = true;
+    }
+    if (config.wsPort !== undefined && typeof config.wsPort !== 'number') {
+        console.warn(`Invalid 'wsPort' in ${CONFIG_FILE_PATH}. It should be a number. Ignoring value.`);
+        delete config.wsPort; // Or set to a default
+        configChanged = true;
+    }
+
     const finalConfig = config as RuntimeConfig; // Now cast to full RuntimeConfig
 
     if (configChanged) {
-        console.log(`Configuration updated with default values for missing fields. Saving new version to ${CONFIG_FILE_PATH}`);
+        console.log(`Configuration updated (or invalid fields removed) in ${CONFIG_FILE_PATH}. Saving new version.`);
         // Save the corrected/updated config back to the file
-        // Note: initializeDefaultConfig writes the complete defaultConfig, here we want to preserve existing valid fields.
         await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(finalConfig, null, 2), 'utf-8');
     }
 
@@ -65,7 +83,7 @@ export async function loadConfiguration(): Promise<RuntimeConfig> {
     return finalConfig;
   } catch (error: any) {
     if (error.code === 'ENOENT') {
-      console.log(`${CONFIG_FILE_PATH} not found. Initializing with default configuration.`);
+      console.log(`${CONFIG_FILE_PATH} not found. Initializing with default configuration (ports will be undefined).`);
       return await initializeDefaultConfig();
     } else {
       console.error(`Error reading ${CONFIG_FILE_PATH}. Using default configuration. Error:`, error);
