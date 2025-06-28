@@ -23,8 +23,10 @@
   },
   "homepage": "https://github.com/GuilhermeStrice/key_manager#readme",
   "devDependencies": {
+    "@types/cookie-parser": "^1.4.9",
     "@types/express": "^5.0.3",
     "@types/jest": "^30.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.0.4",
     "@types/ws": "^8.18.1",
     "jest": "^30.0.3",
@@ -34,10 +36,12 @@
   },
   "dependencies": {
     "@types/helmet": "^0.0.48",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^16.6.0",
     "ejs": "^3.1.10",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
     "ws": "^8.18.2"
   }
 }

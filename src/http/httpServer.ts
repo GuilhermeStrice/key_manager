@@ -2,11 +2,21 @@
 import express from 'express';
 import path from 'path';
 import helmet from 'helmet'; // Security headers
+import jwt from 'jsonwebtoken'; // Added for JWT
+import cookieParser from 'cookie-parser'; // Added for cookie parsing
 import * as DataManager from '../lib/dataManager'; // Import DataManager functions
 
 // This is a very basic way to hold the password for the session.
 // In a more complex app, this would be handled more securely, perhaps not stored directly.
 let serverAdminPasswordSingleton: string | null = null;
+
+// IMPORTANT: Set a strong, unique JWT_SECRET in your .env file for production!
+const JWT_SECRET = process.env.JWT_SECRET || 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD';
+if (JWT_SECRET === 'DEFAULT_FALLBACK_SECRET_DO_NOT_USE_IN_PROD') {
+    console.warn('WARNING: Using default JWT secret. This is NOT secure for production. Set JWT_SECRET in your environment.');
+}
+const ADMIN_COOKIE_NAME = 'admin_token';
+
 
 export function startHttpServer(port: number, serverAdminPassword?: string) {
   const app = express();
@@ -28,30 +38,60 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   app.use(express.urlencoded({ extended: true }));
   // Middleware for parsing JSON bodies
   app.use(express.json());
+  // Middleware for parsing cookies
+  app.use(cookieParser());
 
 
   // Simple password protection for all /admin routes
   // TODO: Implement proper session-based authentication for the admin panel
   const adminAuth = (req: express.Request, res: express.Response, next: express.NextFunction): any => { // Added : any
+    // Allow access to login page (GET and POST) without further checks here
+    if (req.path === '/admin/login') {
+        return next();
+    }
+
     if (!serverAdminPasswordSingleton) {
         console.warn('Admin password not set for HTTP server. Admin routes will be inaccessible.');
         return res.status(500).send('Admin interface not configured.');
     }
 
+    // 1. Check for JWT in cookie for all other /admin routes
+    const tokenCookie = req.cookies[ADMIN_COOKIE_NAME];
+    if (tokenCookie) {
+        try {
+            jwt.verify(tokenCookie, JWT_SECRET); // Throws error if invalid
+            // Optional: req.user = decoded;
+            return next(); // Valid JWT cookie, allow access
+        } catch (err) {
+            console.warn('Invalid JWT cookie:', err.message);
+            res.clearCookie(ADMIN_COOKIE_NAME, { path: '/admin' }); // Clear bad cookie
+            // Fall through to redirect to login
+        }
+    }
+
+    // 2. Check for Bearer token (for API or manual testing) for all other /admin routes
+    // This is kept for now for existing API/testing workflows.
+    // For a pure cookie-based session UI, this Bearer token check could be removed for UI routes.
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
-        const token = authHeader.substring(7); // Extract token from "Bearer <token>"
-        if (token === serverAdminPasswordSingleton) {
+        const bearerToken = authHeader.substring(7);
+        if (bearerToken === serverAdminPasswordSingleton) {
             return next();
         }
     }
 
-    // Query parameter for password is no longer supported for general auth.
-    // Login form POST is the primary way for browsers without Bearer token capability.
+    // If here, neither JWT cookie nor valid Bearer token was found for a protected route
+    // Redirect to login page
+    return res.status(401).redirect('/admin/login');
+  };
 
-    // Simple login page
-    if (req.path === '/admin/login' && req.method === 'GET') {
-        return res.send(`
+  // The adminAuth middleware is applied individually to each protected /admin/* route below,
+  // except for /admin/login routes themselves which handle their own logic.
+
+
+  // LOGIN ROUTES
+  app.get('/admin/login', (req, res) => {
+     res.send(`
             <h1>Admin Login</h1>
             <form action="/admin/login" method="POST">
                 <label for="password">Password:</label>
@@ -74,13 +114,10 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
             // This login form is more for show until proper sessions are built.
             // IMPORTANT: Since query param password is removed, user MUST use Bearer token for subsequent requests.
             // Or we implement actual sessions.
-            return res.send(`
-                <p>Login Succeeded (conceptually).</p>
-                <p>For subsequent admin actions, you must use the 'Authorization: Bearer YOUR_SERVER_PASSWORD' header.</p>
-                <p>You can use browser developer tools or extensions like ModHeader to set this header for this session.</p>
-                <p><a href="/admin">Proceed to Admin (requires Bearer token to be set)</a></p>
-                <p><a href="/admin/login">Back to Login</a></p>
-            `);
+            // Generate JWT
+            const token = jwt.sign({ admin: true, user: 'admin' }, JWT_SECRET, { expiresIn: '1h' });
+            res.cookie(ADMIN_COOKIE_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', path: '/admin' });
+            return res.redirect('/admin'); // Redirect to admin page after setting cookie
         } else {
             return res.status(401).send('<h1>Admin Login</h1><p>Incorrect password.</p><form action="/admin/login" method="POST"><label for="password">Password:</label><input type="password" id="password" name="password" required><button type="submit">Login</button></form>');
         }
@@ -115,21 +152,17 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
 
   app.post('/admin/login', express.urlencoded({ extended: false }), (req, res) => {
      if (req.body.password && req.body.password === serverAdminPasswordSingleton) {
-        // In a real app: set a signed cookie for session management.
-        // For now, just acknowledge. User will need to supply password for other routes.
-        // Redirecting to /admin. User must use Bearer token.
-        // Consider sending a page that instructs on Bearer token usage instead of an immediate redirect,
-        // or rely on the adminAuth's POST handler message.
-        // For simplicity, let's redirect and assume Bearer token will be used, or rely on adminAuth's message.
-        // A better user experience would be to show the same message as adminAuth's POST handler.
-        // Let's align it with the message from adminAuth.
-         res.send(`
-            <p>Login Succeeded.</p>
-            <p>For subsequent admin actions, you must use the 'Authorization: Bearer YOUR_SERVER_PASSWORD' header.</p>
-            <p>You can use browser developer tools or extensions like ModHeader to set this header for this session.</p>
-            <p><a href="/admin">Proceed to Admin (requires Bearer token to be set)</a></p>
-            <p><a href="/admin/login">Back to Login</a></p>
-        `);
+        // Generate JWT
+        const token = jwt.sign({ admin: true, user: 'admin' }, JWT_SECRET, { expiresIn: '1h' });
+        // Set cookie options: httpOnly for security, secure in production, path for admin routes
+        const cookieOptions: express.CookieOptions = {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            path: '/admin',
+            sameSite: 'lax' // Recommended for CSRF protection
+        };
+        res.cookie(ADMIN_COOKIE_NAME, token, cookieOptions);
+        res.redirect('/admin'); // Redirect to admin page
     } else {
         res.status(401).send('Login failed. <a href="/admin/login">Try again</a>');
     }
@@ -418,9 +451,9 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   });
 
 
-  app.get('/admin/logout', adminAuth, (req, res) => {
-    // currentPassword from query is removed.
-    res.send(`Logged out (conceptually). <a href="/admin/login">Login again</a>`);
+  app.get('/admin/logout', (req, res) => { // adminAuth not strictly needed if just clearing cookie
+    res.clearCookie(ADMIN_COOKIE_NAME, { path: '/admin' });
+    res.redirect('/admin/login');
   });
 
   // Placeholder for other non-admin routes or a root welcome
