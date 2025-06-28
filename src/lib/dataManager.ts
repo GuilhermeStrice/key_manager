@@ -3,11 +3,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto'; // For generating client IDs and tokens
 import { encrypt, decrypt, deriveMasterKey, generateSalt } from './encryption';
-import { fileURLToPath } from 'url'; // Added for __dirname replacement
+// import { fileURLToPath } from 'url'; // No longer needed for CommonJS
 
-// Helper to get __dirname in ES Modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// __filename and __dirname are available automatically in CommonJS
 
 const DATA_DIR = path.join(__dirname, '../../data');
 const DATA_FILE_NAME = 'secrets.json.enc';
