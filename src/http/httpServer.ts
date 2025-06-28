@@ -29,6 +29,10 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
   // Middleware for parsing JSON bodies
   app.use(express.json());
 
+  // Serve static files from 'public' directory (e.g., for client-example.js)
+  // __dirname here is src/http, so ../../public points to project_root/public
+  app.use(express.static(path.join(__dirname, '../../public')));
+
 
   // Simple password protection for all /admin routes
   // TODO: Implement proper session-based authentication for the admin panel
