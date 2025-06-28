@@ -140,12 +140,30 @@
                              if (serverMessage.code === WsResponseCodes.OK) {
                                 logMessage(`Authorized/Available secrets: ${serverMessage.payload.authorizedSecretKeys || serverMessage.payload.availableSecretKeys.join(', ')}`, 'info');
                                 // For this client, assume approval if it gets this list successfully for now
-                                clientIsApproved = true;
-                                requestSecretBtn.disabled = !clientIsApproved;
-                                listSecretsBtn.disabled = !clientIsApproved;
-                                clientStatusSpan.textContent = 'Approved. Actions enabled.';
+                                // However, STATUS_UPDATE is the definitive source of approval state.
+                                // clientIsApproved = true; // Let STATUS_UPDATE handle this
+                                // requestSecretBtn.disabled = !clientIsApproved;
+                                // listSecretsBtn.disabled = !clientIsApproved;
+                                // clientStatusSpan.textContent = 'Approved. Actions enabled.';
                             } else {
                                 logMessage(`Error listing secrets (Code: ${serverMessage.code}): ${serverMessage.payload.detail}`, 'error');
+                            }
+                            break;
+                        case 'STATUS_UPDATE':
+                            logMessage(`Server Status Update (Code: ${serverMessage.code}): ${serverMessage.payload.detail}`, 'info');
+                            clientStatusSpan.textContent = `Status: ${serverMessage.payload.newStatus}. ${serverMessage.payload.detail || ''}`;
+                            if (serverMessage.payload.newStatus === 'approved') {
+                                clientIsApproved = true;
+                                requestSecretBtn.disabled = false;
+                                listSecretsBtn.disabled = false;
+                            } else {
+                                clientIsApproved = false;
+                                requestSecretBtn.disabled = true;
+                                listSecretsBtn.disabled = true;
+                                if (serverMessage.payload.newStatus === 'rejected' && serverAssignedClientId) {
+                                     // If rejected after being pending, they might need to re-register or be stuck
+                                     logMessage('Your registration was rejected or your session ended.', 'error');
+                                }
                             }
                             break;
                         // UNAUTHORIZED_SECRET_ACCESS type might be consolidated into general ERROR with code 4001
@@ -163,8 +181,8 @@
                                     updateClientStateDisplay();
                                 } else if (serverMessage.code === WsResponseCodes.CLIENT_NOT_REGISTERED) {
                                     clientStatusSpan.textContent = "Not Registered. Please register.";
-                                } else {
-                                   clientStatusSpan.textContent = "Action Unauthorized or Approval Pending.";
+                                } else { // General UNAUTHORIZED
+                                   clientStatusSpan.textContent = "Action Unauthorized or Approval Pending/Rejected.";
                                 }
                             }
                             break;

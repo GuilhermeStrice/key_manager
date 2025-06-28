@@ -38,6 +38,36 @@ function sendWsResponse(ws: AuthenticatedWebSocket, type: string, code: number, 
   ws.send(JSON.stringify(response));
 }
 
+// Map to store active WebSocket connections by their server-assigned client ID
+const activeConnections: Map<string, AuthenticatedWebSocket> = new Map();
+
+// Function to be exported for HTTP server to call
+export function notifyClientStatusUpdate(clientId: string, newStatus: DataManager.ClientStatus, detail?: string) {
+    const ws = activeConnections.get(clientId);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        let responseCode = WsResponseCodes.OK; // Generic OK for status update
+        let messageType = "STATUS_UPDATE";
+
+        if (newStatus === 'approved') {
+            // Optionally use a more specific code or rely on payload.
+            // For now, client will get 'approved' in payload.
+            // responseCode = WsResponseCodes.CLIENT_APPROVED; // If we had this code used for responses
+            console.log(`Notifying client ${clientId} of approval.`);
+        } else if (newStatus === 'rejected') {
+            responseCode = WsResponseCodes.UNAUTHORIZED; // Or a specific "CLIENT_REJECTED" code if defined
+            console.log(`Notifying client ${clientId} of rejection.`);
+        }
+        // Add more cases if other statuses are pushed (e.g., 'expired' if distinct from 'rejected')
+
+        sendWsResponse(ws, messageType, responseCode, {
+            newStatus: newStatus,
+            detail: detail || `Your registration status is now: ${newStatus}`
+        });
+    } else {
+        console.log(`Client ${clientId} not actively connected or WebSocket not open. Cannot send status update.`);
+    }
+}
+
 
 export function startWebSocketServer(port: number) {
   // Removed initialConnectionMode and acceptAllWebSocketConnections global toggle
@@ -87,7 +117,13 @@ export function startWebSocketServer(port: number) {
             const newClient = await DataManager.addPendingClient(payload.clientName, payload.requestedSecretKeys);
 
             ws.clientRegisteredName = newClient.name;
+            ws.clientRegisteredName = newClient.name;
             ws.clientServerId = newClient.id;
+
+            // Store active connection
+            activeConnections.set(newClient.id, ws);
+            console.log(`Active connections: ${activeConnections.size}`);
+
 
             sendWsResponse(ws, "REGISTRATION_ACK", WsResponseCodes.REGISTRATION_SUBMITTED, {
                 clientId: newClient.id,
@@ -182,8 +218,25 @@ export function startWebSocketServer(port: number) {
       }
     });
 
-    ws.on('close', () => {
-      console.log(`Client ${ws.clientRegisteredName || 'Unknown'} (${ws.clientServerId || 'N/A'}) disconnected from WebSocket server`);
+    ws.on('close', async () => { // Made async to await DataManager call
+      const clientName = ws.clientRegisteredName || 'Unknown';
+      const clientId = ws.clientServerId;
+      console.log(`Client ${clientName} (${clientId || 'N/A'}) disconnected from WebSocket server`);
+
+      if (clientId) {
+        activeConnections.delete(clientId);
+        console.log(`Removed client ${clientId} from active connections. Remaining: ${activeConnections.size}`);
+
+        // Check client status before calling handleClientDisconnect
+        const clientInfo = DataManager.getClient(clientId);
+        if (clientInfo && clientInfo.status === 'approved') {
+          try {
+            await DataManager.handleClientDisconnect(clientId);
+          } catch (dbError) {
+            console.error(`Error updating DataManager on disconnect for client ${clientId}:`, dbError);
+          }
+        }
+      }
     });
 
     ws.on('error', (error) => {

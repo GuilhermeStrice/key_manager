@@ -438,3 +438,31 @@ export async function deleteClient(clientId: string): Promise<void> {
         console.warn(`Client "${clientId}" not found for deletion.`);
     }
 }
+
+/**
+ * Handles a client disconnect. If the client was 'approved',
+ * its status is set to 'rejected'.
+ * @param clientId The ID of the disconnected client.
+ */
+export async function handleClientDisconnect(clientId: string): Promise<void> {
+  const client = dataStore.clients[clientId];
+  if (client) { // Check if client exists, to prevent errors if called with an already deleted/unknown ID
+    if (client.status === 'approved') {
+      console.log(`Approved client "${client.name}" (ID: ${client.id}) disconnected. Setting status to rejected.`);
+      client.status = 'rejected';
+      client.dateUpdated = new Date().toISOString();
+      // No need to clear associatedSecretKeys, they might be useful if client is re-approved quickly.
+      // Or, business logic might dictate clearing them. For now, keep them.
+      try {
+        await saveData();
+        console.log(`Saved data after client ${clientId} disconnect.`);
+      } catch (error) {
+        console.error(`Failed to save data after client ${clientId} disconnect:`, error);
+      }
+    } else {
+      console.log(`Client "${client.name}" (ID: ${client.id}) disconnected with status: ${client.status}. No status change needed from 'approved'.`);
+    }
+  } else {
+    console.warn(`Attempted to handle disconnect for unknown client ID: ${clientId}`);
+  }
+}

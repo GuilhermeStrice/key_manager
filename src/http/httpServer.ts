@@ -5,6 +5,7 @@ import helmet from 'helmet'; // Security headers
 import jwt from 'jsonwebtoken'; // Added for JWT
 import cookieParser from 'cookie-parser'; // Added for cookie parsing
 import * as DataManager from '../lib/dataManager'; // Import DataManager functions
+import { notifyClientStatusUpdate } from '../websocket/wsServer'; // Import notification function
 
 // This is a very basic way to hold the password for the session.
 // In a more complex app, this would be handled more securely, perhaps not stored directly.
@@ -278,6 +279,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     try {
       const client = await DataManager.approveClient(clientId);
       // authToken is no longer generated or part of ClientInfo
+      notifyClientStatusUpdate(clientId, 'approved', `Client ${client.name} has been approved by an administrator.`);
       res.redirect(`/admin/clients?message=Client+${client.name}+approved.&messageType=success`);
     } catch (error: any) {
       res.redirect(`/admin/clients?message=Error+approving+client:+${encodeURIComponent(error.message)}&messageType=error`);
@@ -289,6 +291,7 @@ export function startHttpServer(port: number, serverAdminPassword?: string) {
     // currentPassword from query is removed.
     try {
       const client = await DataManager.rejectClient(clientId);
+      notifyClientStatusUpdate(clientId, 'rejected', `Client ${client.name} has been rejected by an administrator.`);
       res.redirect(`/admin/clients?message=Client+${client.name}+rejected.&messageType=success`);
     } catch (error: any) {
       res.redirect(`/admin/clients?message=Error+rejecting+client:+${encodeURIComponent(error.message)}&messageType=error`);
